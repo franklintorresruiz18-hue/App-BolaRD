@@ -1,0 +1,4719 @@
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>MiBola</title>
+
+<link rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: Arial, sans-serif;
+    background: #f5f5f5;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* ===============================
+   MAPA
+================================ */
+
+#map {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100vh;
+    z-index: 1;
+}
+
+/* Mapa ampliado para conductor */
+#map.mapa-conductor {
+    height: 100vh;
+    z-index: 1;
+}
+
+/* ===============================
+   LOGIN
+================================ */
+
+.auth-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    background: #f5f5f5;
+    overflow-y: auto;
+}
+
+.login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.login-box {
+    width: 100%;
+    max-width: 400px;
+    background: white;
+    padding: 25px;
+    border-radius: 20px;
+    box-shadow: 0 5px 25px rgba(0,0,0,.12);
+}
+
+.logo {
+    text-align: center;
+    font-size: 30px;
+    font-weight: bold;
+    margin-bottom: 20px;
+}
+
+.logo span {
+    display: block;
+    font-size: 14px;
+    color: #777;
+    margin-top: 5px;
+}
+
+.input {
+    width: 100%;
+    padding: 14px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-size: 16px;
+    margin-bottom: 10px;
+    outline: none;
+}
+
+.button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    background: #111;
+    color: white;
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 8px;
+}
+
+.button:disabled {
+    opacity: .5;
+}
+
+.button-danger {
+    background: #c62828;
+}
+
+.button-success {
+    background: #16843b;
+}
+
+.button-secondary {
+    background: #555;
+}
+
+.auth-link {
+    text-align: center;
+    margin-top: 16px;
+    color: #111;
+    font-size: 14px;
+}
+
+.auth-link button {
+    border: none;
+    background: transparent;
+    color: #0066cc;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.error {
+    color: #c62828;
+    background: #ffebee;
+    padding: 10px;
+    border-radius: 10px;
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+.success {
+    color: #166534;
+    background: #dcfce7;
+    padding: 10px;
+    border-radius: 10px;
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+.tipo-registro {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.tipo-registro button {
+    flex: 1;
+    padding: 14px;
+    border: 2px solid #ddd;
+    background: white;
+    border-radius: 12px;
+    font-weight: bold;
+}
+
+.tipo-registro button.active {
+    border-color: #111;
+    background: #f1f1f1;
+}
+
+/* ===============================
+   PANEL
+================================ */
+
+.panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: 65vh;
+    overflow-y: auto;
+    background: white;
+    border-radius: 25px 25px 0 0;
+    padding: 16px;
+    z-index: 1000;
+    box-shadow: 0 -5px 20px rgba(0,0,0,.20);
+}
+
+.panel.conductor-activo {
+    max-height: 43vh;
+    overflow-y: auto;
+}
+
+.handle {
+    width: 45px;
+    height: 5px;
+    background: #ccc;
+    border-radius: 10px;
+    margin: 0 auto 12px;
+}
+
+/* ===============================
+   GENERAL
+================================ */
+
+.step {
+    font-size: 11px;
+    font-weight: bold;
+    color: #777;
+    margin-bottom: 7px;
+}
+
+.title {
+    font-size: 21px;
+    font-weight: bold;
+    margin-bottom: 12px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 14px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    font-size: 16px;
+    outline: none;
+}
+
+.results {
+    background: white;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.result {
+    padding: 12px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.location-info {
+    margin: 10px 0;
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 10px;
+    font-size: 13px;
+}
+
+/* ===============================
+   VEHICULOS
+================================ */
+
+.vehicle-container {
+    display: flex;
+    gap: 10px;
+}
+
+.vehicle {
+    flex: 1;
+    padding: 14px;
+    border: 2px solid #ddd;
+    border-radius: 14px;
+    text-align: center;
+}
+
+.vehicle.active {
+    border-color: #111;
+    background: #f5f5f5;
+}
+
+.vehicle-icon {
+    font-size: 30px;
+}
+
+.vehicle-name {
+    font-weight: bold;
+    margin-top: 5px;
+}
+
+/* ===============================
+   PRECIO
+================================ */
+
+.price-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f5f5f5;
+    padding: 13px;
+    border-radius: 14px;
+    margin-top: 12px;
+}
+
+.price {
+    font-size: 23px;
+    font-weight: bold;
+}
+
+/* ===============================
+   BUSCANDO
+================================ */
+
+.searching {
+    text-align: center;
+    padding: 20px 0;
+}
+
+.searching-icon {
+    font-size: 45px;
+}
+
+.loader {
+    width: 35px;
+    height: 35px;
+    border: 4px solid #ddd;
+    border-top-color: #111;
+    border-radius: 50%;
+    animation: girar 1s linear infinite;
+    margin: 12px auto;
+}
+
+@keyframes girar {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ===============================
+   CONDUCTOR
+================================ */
+
+.driver-card {
+    background: #f5f5f5;
+    border-radius: 16px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.driver-avatar {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: #111;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 27px;
+    float: left;
+    margin-right: 12px;
+}
+
+.driver-name {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.driver-info {
+    margin-top: 7px;
+    font-size: 14px;
+    color: #555;
+}
+
+.clear {
+    clear: both;
+}
+
+/* ===============================
+   ESTADOS
+================================ */
+
+.status-card {
+    padding: 13px;
+    background: #111;
+    color: white;
+    border-radius: 14px;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.status-online {
+    color: green;
+    font-weight: bold;
+}
+
+.status-offline {
+    color: #777;
+    font-weight: bold;
+}
+
+/* ===============================
+   VIAJE CONDUCTOR
+================================ */
+
+.driver-trip {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 14px;
+    padding: 13px;
+    margin-bottom: 10px;
+}
+
+.driver-trip-title {
+    font-size: 17px;
+    font-weight: bold;
+}
+
+.driver-trip-row {
+    margin-top: 7px;
+    font-size: 14px;
+}
+
+.driver-trip-price {
+    font-size: 21px;
+    font-weight: bold;
+    margin-top: 8px;
+}
+
+/* ===============================
+   CANCELADO
+================================ */
+
+.cancelled-card {
+    background: #ffebee;
+    color: #b71c1c;
+    padding: 15px;
+    border-radius: 14px;
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* ===============================
+   CHAT
+================================ */
+
+.chat {
+    border: 1px solid #ddd;
+    border-radius: 15px;
+    overflow: hidden;
+    background: white;
+    margin-top: 12px;
+}
+
+.chat-title {
+    padding: 12px;
+    font-weight: bold;
+    background: #f5f5f5;
+}
+
+.chat-messages {
+    height: 160px;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.chat-message {
+    max-width: 80%;
+    padding: 9px 11px;
+    border-radius: 12px;
+    margin-bottom: 7px;
+    font-size: 14px;
+}
+
+.chat-me {
+    margin-left: auto;
+    background: #111;
+    color: white;
+}
+
+.chat-other {
+    margin-right: auto;
+    background: #eee;
+}
+
+.chat-input-row {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-top: 1px solid #ddd;
+}
+
+.chat-input {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 10px;
+    outline: none;
+}
+
+.chat-send {
+    width: 55px;
+    border: none;
+    border-radius: 10px;
+    background: #111;
+    color: white;
+    font-size: 18px;
+}
+
+/* ===============================
+   CODIGO
+================================ */
+
+.verificacion {
+    background: #fff8e1;
+    border: 1px solid #ffcc80;
+    padding: 14px;
+    border-radius: 14px;
+    margin-top: 12px;
+}
+
+.verificacion-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.codigo-input {
+    width: 100%;
+    padding: 14px;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    font-size: 22px;
+    text-align: center;
+    letter-spacing: 5px;
+}
+
+/* ===============================
+   MODO
+================================ */
+
+.mode-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.mode-buttons .button {
+    margin-top: 0;
+}
+
+.header-user {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.logout {
+    border: none;
+    background: #eee;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+/* ===============================
+   BOTON MAPA
+================================ */
+
+.map-control {
+    position: fixed;
+    right: 15px;
+    bottom: 45vh;
+    z-index: 2000;
+    background: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    box-shadow: 0 3px 12px rgba(0,0,0,.25);
+    font-size: 21px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="map" class="hidden"></div>
+
+<!-- LOGIN -->
+
+<div id="pantallaLogin" class="auth-screen">
+
+    <div class="login-container">
+
+        <div class="login-box">
+
+            <div class="logo">
+                🚕 MiBola
+                <span>Tu transporte, a tu manera</span>
+            </div>
+
+            <input
+                id="loginTelefono"
+                class="input"
+                type="tel"
+                placeholder="Teléfono">
+
+            <input
+                id="loginPassword"
+                class="input"
+                type="password"
+                placeholder="Contraseña">
+
+            <button
+                id="btnLogin"
+                class="button"
+                onclick="iniciarSesion()">
+                🔐 Iniciar sesión
+            </button>
+
+            <div id="errorLogin"></div>
+
+            <div class="auth-link">
+                ¿No tienes una cuenta?
+                <button onclick="mostrarRegistro()">
+                    Registrarse aquí
+                </button>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- REGISTRO -->
+
+<div id="pantallaRegistro" class="auth-screen hidden">
+
+    <div class="login-container">
+
+        <div class="login-box">
+
+            <div class="logo">
+                🚕 MiBola
+                <span>Crear nueva cuenta</span>
+            </div>
+
+            <input
+                id="registroNombre"
+                class="input"
+                type="text"
+                placeholder="Nombre completo">
+
+            <input
+                id="registroTelefono"
+                class="input"
+                type="tel"
+                placeholder="Teléfono">
+
+            <input
+                id="registroPassword"
+                class="input"
+                type="password"
+                placeholder="Contraseña">
+
+            <div class="step">
+                QUIERO REGISTRARME COMO
+            </div>
+
+            <div class="tipo-registro">
+
+                <button
+                    id="tipoPasajero"
+                    class="active"
+                    onclick="seleccionarTipoRegistro('pasajero')">
+                    👤 Pasajero
+                </button>
+
+                <button
+                    id="tipoConductor"
+                    onclick="seleccionarTipoRegistro('conductor')">
+                    🚗 Conductor
+                </button>
+
+            </div>
+
+            <button
+                id="btnRegistro"
+                class="button"
+                onclick="registrarUsuario()">
+                📝 Crear cuenta
+            </button>
+
+            <div id="errorRegistro"></div>
+
+            <div class="auth-link">
+                ¿Ya tienes una cuenta?
+                <button onclick="mostrarLogin()">
+                    Iniciar sesión
+                </button>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- APP -->
+
+<div id="app" class="hidden">
+
+    <div class="panel">
+
+        <div class="handle"></div>
+
+        <div class="header-user">
+
+            <div>
+                <b id="nombreUsuario">Usuario</b>
+                <br>
+                <small id="tipoUsuario">—</small>
+            </div>
+
+            <button
+                class="logout"
+                onclick="cerrarSesion()">
+                Salir
+            </button>
+
+        </div>
+
+        <div class="mode-buttons">
+
+            <button
+                class="button"
+                onclick="mostrarPasajero()">
+                👤 Pasajero
+            </button>
+
+            <button
+                class="button"
+                onclick="mostrarConductor()">
+                🚗 Conductor
+            </button>
+
+        </div>
+
+        <!-- PASAJERO -->
+
+        <div id="modoPasajero">
+
+            <div id="pasoRecogida">
+
+                <div class="step">
+                    PASO 1 DE 3
+                </div>
+
+                <div class="title">
+                    📍 Lugar de recogida
+                </div>
+
+                <input
+                    id="inputRecogida"
+                    class="search-input"
+                    placeholder="¿Dónde te recogemos?"
+                    oninput="buscarRecogida()">
+
+                <div
+                    id="resultadosRecogida"
+                    class="results">
+                </div>
+
+                <div
+                    id="infoRecogida"
+                    class="location-info">
+                    Obteniendo ubicación...
+                </div>
+
+                <button
+                    class="button"
+                    onclick="centrarGPS()">
+                    📍 Usar mi ubicación
+                </button>
+
+                <button
+                    class="button"
+                    onclick="confirmarRecogida()">
+                    Confirmar recogida
+                </button>
+
+            </div>
+
+            <div id="pasoDestino" class="hidden">
+
+                <div class="step">
+                    PASO 2 DE 3
+                </div>
+
+                <div class="title">
+                    🎯 ¿A dónde vas?
+                </div>
+
+                <input
+                    id="inputDestino"
+                    class="search-input"
+                    placeholder="¿Cuál es tu destino?"
+                    oninput="buscarDestino()">
+
+                <div
+                    id="resultadosDestino"
+                    class="results">
+                </div>
+
+                <div
+                    id="infoDestino"
+                    class="location-info">
+                    Busca tu destino.
+                </div>
+
+                <button
+                    class="button"
+                    onclick="confirmarDestino()">
+                    Confirmar destino
+                </button>
+
+            </div>
+
+            <div id="pasoVehiculo" class="hidden">
+
+                <div class="step">
+                    PASO 3 DE 3
+                </div>
+
+                <div class="title">
+                    ¿Qué necesitas?
+                </div>
+
+                <div class="vehicle-container">
+
+                    <div
+                        id="vehiculo"
+                        class="vehicle active"
+                        onclick="seleccionarVehiculo('vehiculo')">
+
+                        <div class="vehicle-icon">
+                            🚗
+                        </div>
+
+                        <div class="vehicle-name">
+                            Vehículo
+                        </div>
+
+                    </div>
+
+                    <div
+                        id="motor"
+                        class="vehicle"
+                        onclick="seleccionarVehiculo('motor')">
+
+                        <div class="vehicle-icon">
+                            🏍️
+                        </div>
+
+                        <div class="vehicle-name">
+                            Motor
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="price-box">
+
+                    <div>
+                        <div>Tarifa estimada</div>
+
+                        <small id="rutaInfo">
+                            Calculando...
+                        </small>
+                    </div>
+
+                    <div id="precio" class="price">
+                        RD$0
+                    </div>
+
+                </div>
+
+                <button
+                    id="btnSolicitar"
+                    class="button"
+                    onclick="solicitarViaje()">
+                    🚕 Solicitar MiBola
+                </button>
+
+            </div>
+
+            <div id="pasoBuscando" class="hidden">
+
+                <div class="searching">
+
+                    <div class="searching-icon">
+                        🚕
+                    </div>
+
+                    <div class="title">
+                        Buscando conductor...
+                    </div>
+
+                    <div class="loader"></div>
+
+                    <div id="estadoPasajero">
+                        Estamos buscando un conductor cercano.
+                    </div>
+
+                </div>
+
+                <button
+                    class="button button-danger"
+                    onclick="cancelarViajePasajero()">
+                    ❌ Cancelar viaje
+                </button>
+
+            </div>
+
+            <div
+                id="panelConductorAceptado"
+                class="hidden">
+
+                <div class="step">
+                    TU CONDUCTOR
+                </div>
+
+                <div
+                    id="estadoViajePasajero"
+                    class="status-card">
+                    🚗 Conductor aceptó tu viaje
+                </div>
+
+                <div
+                    id="datosConductor"
+                    class="driver-card">
+                </div>
+
+                <button
+                    id="btnLlamarConductor"
+                    class="button">
+                    📞 Llamar al conductor
+                </button>
+
+                <div
+                    id="codigoPasajeroBox"
+                    class="verificacion hidden">
+
+                    <div class="verificacion-title">
+                        🔐 Código de verificación
+                    </div>
+
+                    <div>
+                        Dale este código al conductor
+                        cuando estés listo para abordar.
+                    </div>
+
+                    <div
+                        id="codigoPasajero"
+                        style="
+                        font-size:32px;
+                        font-weight:bold;
+                        text-align:center;
+                        margin-top:10px;
+                        letter-spacing:8px;">
+                    </div>
+
+                </div>
+
+                <button
+                    class="button button-danger"
+                    onclick="cancelarViajePasajero()">
+                    ❌ Cancelar viaje
+                </button>
+
+                <div class="chat">
+
+                    <div class="chat-title">
+                        💬 Chat con el conductor
+                    </div>
+
+                    <div
+                        id="mensajesChat"
+                        class="chat-messages">
+                    </div>
+
+                    <div class="chat-input-row">
+
+                        <input
+                            id="inputChat"
+                            class="chat-input"
+                            placeholder="Escribe un mensaje..."
+                            onkeydown="enterChat(event)">
+
+                        <button
+                            class="chat-send"
+                            onclick="enviarMensaje()">
+                            ➤
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div
+                id="canceladoPasajero"
+                class="hidden">
+
+                <div class="cancelled-card">
+                    ⚠️ Viaje cancelado
+                    <div
+                        id="motivoCanceladoPasajero"
+                        style="
+                        margin-top:8px;
+                        font-weight:normal;">
+                    </div>
+                </div>
+
+                <button
+                    class="button"
+                    onclick="mostrarNuevoViajePasajero()">
+                    🚕 Solicitar nuevo viaje
+                </button>
+
+            </div>
+
+        </div>
+
+        <!-- CONDUCTOR -->
+
+        <div id="modoConductor" class="hidden">
+
+            <div class="step">
+                MODO CONDUCTOR
+            </div>
+
+            <div class="title">
+                🚗 Panel del conductor
+            </div>
+
+            <div class="location-info">
+
+                Conductor:
+                <b id="nombreConductor">—</b>
+
+                <br>
+
+                ID:
+                <b id="idConductor">—</b>
+
+            </div>
+
+            <div class="driver-card">
+
+                <span>Estado:</span>
+
+                <span
+                    id="textoEstadoConductor"
+                    class="status-offline">
+                    Desconectado
+                </span>
+
+                <button
+                    id="btnEstadoConductor"
+                    class="button"
+                    onclick="cambiarEstadoConductor()">
+                    🟢 Conectarme
+                </button>
+
+            </div>
+
+            <div
+                id="viajeActualConductor"
+                class="hidden">
+
+                <div class="step">
+                    VIAJE ACTUAL
+                </div>
+
+                <div
+                    id="detalleViajeConductor"
+                    class="driver-trip">
+                </div>
+
+            </div>
+
+            <div id="canceladoConductor" class="hidden">
+
+                <div class="cancelled-card">
+
+                    ⚠️ Viaje cancelado
+
+                    <div
+                        id="motivoCanceladoConductor"
+                        style="
+                        margin-top:8px;
+                        font-weight:normal;">
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div class="step">
+                VIAJES DISPONIBLES
+            </div>
+
+            <div id="viajesDisponibles">
+
+                <div class="location-info">
+                    No hay viajes disponibles.
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+
+/* =====================================================
+   VARIABLES
+===================================================== */
+
+let map = null;
+
+let marcadorRecogida = null;
+let marcadorDestino = null;
+let marcadorConductor = null;
+let rutaLayer = null;
+
+let recogidaLat = null;
+let recogidaLng = null;
+
+let destinoLat = null;
+let destinoLng = null;
+
+let tipoVehiculo = "vehiculo";
+
+let distanciaActual = 0;
+let minutosActuales = 0;
+let precioActual = 0;
+
+let viajeActualId = null;
+
+let conductorOnline = false;
+
+let intervaloPasajero = null;
+let intervaloChat = null;
+let intervaloConductor = null;
+let intervaloViajeConductor = null;
+
+let intervaloGPSConductor = null;
+
+let usuarioActual = null;
+
+let timerRecogida = null;
+let timerDestino = null;
+
+let tipoRegistro = "pasajero";
+
+let ultimoEstadoViaje = null;
+
+
+/* =====================================================
+   UTILIDADES
+===================================================== */
+
+function escaparHTML(texto) {
+
+    const div =
+        document.createElement("div");
+
+    div.innerText =
+        texto === null ||
+        texto === undefined
+            ? ""
+            : String(texto);
+
+    return div.innerHTML;
+}
+
+
+/* =====================================================
+   AUTENTICACION
+===================================================== */
+
+function mostrarRegistro() {
+
+    document
+        .getElementById("pantallaLogin")
+        .classList.add("hidden");
+
+    document
+        .getElementById("pantallaRegistro")
+        .classList.remove("hidden");
+
+}
+
+function mostrarLogin() {
+
+    document
+        .getElementById("pantallaRegistro")
+        .classList.add("hidden");
+
+    document
+        .getElementById("pantallaLogin")
+        .classList.remove("hidden");
+
+}
+
+function seleccionarTipoRegistro(tipo) {
+
+    tipoRegistro = tipo;
+
+    document
+        .getElementById("tipoPasajero")
+        .classList.toggle(
+            "active",
+            tipo === "pasajero"
+        );
+
+    document
+        .getElementById("tipoConductor")
+        .classList.toggle(
+            "active",
+            tipo === "conductor"
+        );
+
+}
+
+
+/* =====================================================
+   REGISTRO
+===================================================== */
+
+async function registrarUsuario() {
+
+    const nombre =
+        document.getElementById(
+            "registroNombre"
+        ).value.trim();
+
+    const telefono =
+        document.getElementById(
+            "registroTelefono"
+        ).value.trim();
+
+    const password =
+        document.getElementById(
+            "registroPassword"
+        ).value;
+
+    const error =
+        document.getElementById(
+            "errorRegistro"
+        );
+
+    const boton =
+        document.getElementById(
+            "btnRegistro"
+        );
+
+    error.innerHTML = "";
+
+    if (!nombre || !telefono || !password) {
+
+        error.innerHTML =
+            '<div class="error">' +
+            'Completa todos los campos.' +
+            '</div>';
+
+        return;
+    }
+
+    if (password.length < 4) {
+
+        error.innerHTML =
+            '<div class="error">' +
+            'La contraseña debe tener al menos 4 caracteres.' +
+            '</div>';
+
+        return;
+    }
+
+    boton.disabled = true;
+    boton.innerText = "Creando cuenta...";
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/registro",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+                            nombre,
+                            telefono,
+                            password,
+                            tipo:
+                                tipoRegistro
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo crear la cuenta."
+            );
+        }
+
+        error.innerHTML =
+            '<div class="success">' +
+            '✅ Cuenta creada correctamente. ' +
+            'Ahora puedes iniciar sesión.' +
+            '</div>';
+
+        setTimeout(
+            mostrarLogin,
+            1200
+        );
+
+    } catch(error) {
+
+        document
+            .getElementById("errorRegistro")
+            .innerHTML =
+                '<div class="error">' +
+                escaparHTML(error.message) +
+                '</div>';
+
+    } finally {
+
+        boton.disabled = false;
+        boton.innerText =
+            "📝 Crear cuenta";
+
+    }
+
+}
+
+
+/* =====================================================
+   USUARIO
+===================================================== */
+
+function cargarUsuario() {
+
+    try {
+
+        const guardado =
+            localStorage.getItem(
+                "mibola_usuario"
+            );
+
+        if (guardado) {
+
+            usuarioActual =
+                JSON.parse(guardado);
+
+        }
+
+    } catch(error) {
+
+        usuarioActual = null;
+
+    }
+
+    if (usuarioActual) {
+
+        mostrarAplicacion();
+
+    }
+
+}
+
+
+/* =====================================================
+   MOSTRAR APP
+===================================================== */
+
+function mostrarAplicacion() {
+
+    document
+        .getElementById("pantallaLogin")
+        .classList.add("hidden");
+
+    document
+        .getElementById("pantallaRegistro")
+        .classList.add("hidden");
+
+    document
+        .getElementById("app")
+        .classList.remove("hidden");
+
+    document
+        .getElementById("map")
+        .classList.remove("hidden");
+
+    document
+        .getElementById("nombreUsuario")
+        .innerText =
+            usuarioActual.nombre ||
+            "Usuario";
+
+    document
+        .getElementById("tipoUsuario")
+        .innerText =
+            usuarioActual.tipo ||
+            "";
+
+    if (
+        usuarioActual.tipo ===
+        "conductor"
+    ) {
+
+        document
+            .getElementById("nombreConductor")
+            .innerText =
+                usuarioActual.nombre ||
+                "—";
+
+        document
+            .getElementById("idConductor")
+            .innerText =
+                usuarioActual.id ||
+                "—";
+
+    }
+
+    iniciarMapaInicial();
+
+    setTimeout(
+        () => {
+
+            if (map) {
+                map.invalidateSize();
+            }
+
+        },
+        300
+    );
+
+    recuperarViajeActivo();
+
+}
+
+
+/* =====================================================
+   LOGIN
+===================================================== */
+
+async function iniciarSesion() {
+
+    const telefono =
+        document.getElementById(
+            "loginTelefono"
+        ).value.trim();
+
+    const password =
+        document.getElementById(
+            "loginPassword"
+        ).value;
+
+    const error =
+        document.getElementById(
+            "errorLogin"
+        );
+
+    const boton =
+        document.getElementById(
+            "btnLogin"
+        );
+
+    error.innerHTML = "";
+
+    if (!telefono || !password) {
+
+        error.innerHTML =
+            '<div class="error">' +
+            'Introduce teléfono y contraseña.' +
+            '</div>';
+
+        return;
+    }
+
+    boton.disabled = true;
+    boton.innerText = "Entrando...";
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/login",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+                            telefono,
+                            password
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo iniciar sesión"
+            );
+        }
+
+        usuarioActual =
+            datos.usuario;
+
+        localStorage.setItem(
+            "mibola_usuario",
+            JSON.stringify(
+                usuarioActual
+            )
+        );
+
+        mostrarAplicacion();
+
+    } catch(error) {
+
+        document
+            .getElementById("errorLogin")
+            .innerHTML =
+                '<div class="error">' +
+                escaparHTML(error.message) +
+                '</div>';
+
+    } finally {
+
+        boton.disabled = false;
+
+        boton.innerText =
+            "🔐 Iniciar sesión";
+
+    }
+
+}
+
+
+/* =====================================================
+   SESION
+===================================================== */
+
+function limpiarIntervalos() {
+
+    if (intervaloPasajero) {
+
+        clearInterval(
+            intervaloPasajero
+        );
+
+        intervaloPasajero = null;
+
+    }
+
+    if (intervaloChat) {
+
+        clearInterval(
+            intervaloChat
+        );
+
+        intervaloChat = null;
+
+    }
+
+    if (intervaloConductor) {
+
+        clearInterval(
+            intervaloConductor
+        );
+
+        intervaloConductor = null;
+
+    }
+
+    if (intervaloViajeConductor) {
+
+        clearInterval(
+            intervaloViajeConductor
+        );
+
+        intervaloViajeConductor = null;
+
+    }
+
+    if (intervaloGPSConductor) {
+
+        clearInterval(
+            intervaloGPSConductor
+        );
+
+        intervaloGPSConductor = null;
+
+    }
+
+}
+
+function cerrarSesion() {
+
+    limpiarIntervalos();
+
+    usuarioActual = null;
+    viajeActualId = null;
+    conductorOnline = false;
+
+    localStorage.removeItem(
+        "mibola_usuario"
+    );
+
+    location.reload();
+
+}
+
+
+/* =====================================================
+   MAPA
+===================================================== */
+
+function iniciarMapa(lat, lng) {
+
+    if (!map) {
+
+        map =
+            L.map("map")
+                .setView(
+                    [lat, lng],
+                    15
+                );
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution:
+                    "© OpenStreetMap"
+            }
+        ).addTo(map);
+
+    } else {
+
+        map.invalidateSize();
+
+    }
+
+}
+
+function iniciarMapaInicial() {
+
+    if (!navigator.geolocation) {
+
+        iniciarMapa(
+            18.4861,
+            -69.9312
+        );
+
+        return;
+
+    }
+
+    navigator.geolocation.getCurrentPosition(
+
+        position => {
+
+            iniciarMapa(
+                position.coords.latitude,
+                position.coords.longitude
+            );
+
+        },
+
+        () => {
+
+            iniciarMapa(
+                18.4861,
+                -69.9312
+            );
+
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 30000
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   GPS PASAJERO
+===================================================== */
+
+function centrarGPS() {
+
+    navigator.geolocation.getCurrentPosition(
+
+        function(position) {
+
+            recogidaLat =
+                position.coords.latitude;
+
+            recogidaLng =
+                position.coords.longitude;
+
+            iniciarMapa(
+                recogidaLat,
+                recogidaLng
+            );
+
+            if (!marcadorRecogida) {
+
+                marcadorRecogida =
+                    L.marker([
+                        recogidaLat,
+                        recogidaLng
+                    ])
+                    .addTo(map);
+
+            } else {
+
+                marcadorRecogida.setLatLng([
+                    recogidaLat,
+                    recogidaLng
+                ]);
+
+            }
+
+            map.setView(
+                [
+                    recogidaLat,
+                    recogidaLng
+                ],
+                16
+            );
+
+            document
+                .getElementById(
+                    "infoRecogida"
+                )
+                .innerText =
+                    "📍 " +
+                    recogidaLat.toFixed(5) +
+                    ", " +
+                    recogidaLng.toFixed(5);
+
+        },
+
+        function() {
+
+            alert(
+                "No se pudo obtener tu ubicación."
+            );
+
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 10000
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   BUSQUEDA
+===================================================== */
+
+function buscarRecogida() {
+
+    clearTimeout(timerRecogida);
+
+    const texto =
+        document
+            .getElementById(
+                "inputRecogida"
+            )
+            .value.trim();
+
+    if (texto.length < 3) {
+
+        document
+            .getElementById(
+                "resultadosRecogida"
+            )
+            .innerHTML = "";
+
+        return;
+
+    }
+
+    timerRecogida =
+        setTimeout(
+            () =>
+                buscarLugar(
+                    texto,
+                    "recogida"
+                ),
+            500
+        );
+
+}
+
+function buscarDestino() {
+
+    clearTimeout(timerDestino);
+
+    const texto =
+        document
+            .getElementById(
+                "inputDestino"
+            )
+            .value.trim();
+
+    if (texto.length < 3) {
+
+        document
+            .getElementById(
+                "resultadosDestino"
+            )
+            .innerHTML = "";
+
+        return;
+
+    }
+
+    timerDestino =
+        setTimeout(
+            () =>
+                buscarLugar(
+                    texto,
+                    "destino"
+                ),
+            500
+        );
+
+}
+
+async function buscarLugar(
+    texto,
+    tipo
+) {
+
+    try {
+
+        const url =
+            "https://nominatim.openstreetmap.org/search" +
+            "?format=json" +
+            "&q=" +
+            encodeURIComponent(texto) +
+            "&limit=5" +
+            "&countrycodes=do";
+
+        const respuesta =
+            await fetch(url);
+
+        const lugares =
+            await respuesta.json();
+
+        const contenedor =
+            document.getElementById(
+                tipo === "recogida"
+                    ? "resultadosRecogida"
+                    : "resultadosDestino"
+            );
+
+        contenedor.innerHTML = "";
+
+        lugares.forEach(
+            lugar => {
+
+                const div =
+                    document.createElement(
+                        "div"
+                    );
+
+                div.className =
+                    "result";
+
+                div.innerText =
+                    "📍 " +
+                    lugar.display_name;
+
+                div.onclick =
+                    () =>
+                        seleccionarLugar(
+                            lugar,
+                            tipo
+                        );
+
+                contenedor.appendChild(
+                    div
+                );
+
+            }
+        );
+
+    } catch(error) {
+
+        console.error(
+            "Error buscando lugar:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   SELECCIONAR LUGAR
+===================================================== */
+
+function seleccionarLugar(
+    lugar,
+    tipo
+) {
+
+    const lat =
+        Number(lugar.lat);
+
+    const lng =
+        Number(lugar.lon);
+
+    if (tipo === "recogida") {
+
+        recogidaLat = lat;
+        recogidaLng = lng;
+
+        iniciarMapa(lat, lng);
+
+        map.setView(
+            [lat, lng],
+            16
+        );
+
+        if (!marcadorRecogida) {
+
+            marcadorRecogida =
+                L.marker([
+                    lat,
+                    lng
+                ])
+                .addTo(map);
+
+        } else {
+
+            marcadorRecogida.setLatLng([
+                lat,
+                lng
+            ]);
+
+        }
+
+        document
+            .getElementById(
+                "inputRecogida"
+            )
+            .value =
+                lugar.display_name;
+
+        document
+            .getElementById(
+                "resultadosRecogida"
+            )
+            .innerHTML = "";
+
+        document
+            .getElementById(
+                "infoRecogida"
+            )
+            .innerText =
+                lugar.display_name;
+
+        return;
+
+    }
+
+    destinoLat = lat;
+    destinoLng = lng;
+
+    iniciarMapa(
+        recogidaLat || lat,
+        recogidaLng || lng
+    );
+
+    if (!marcadorDestino) {
+
+        marcadorDestino =
+            L.marker([
+                lat,
+                lng
+            ])
+            .addTo(map);
+
+    } else {
+
+        marcadorDestino.setLatLng([
+            lat,
+            lng
+        ]);
+
+    }
+
+    document
+        .getElementById(
+            "inputDestino"
+        )
+        .value =
+            lugar.display_name;
+
+    document
+        .getElementById(
+            "resultadosDestino"
+        )
+        .innerHTML = "";
+
+    document
+        .getElementById(
+            "infoDestino"
+        )
+        .innerText =
+            lugar.display_name;
+
+}
+
+
+/* =====================================================
+   PASOS
+===================================================== */
+
+function confirmarRecogida() {
+
+    if (recogidaLat === null) {
+
+        alert(
+            "Selecciona la recogida."
+        );
+
+        return;
+
+    }
+
+    document
+        .getElementById(
+            "pasoRecogida"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "pasoDestino"
+        )
+        .classList.remove("hidden");
+
+}
+
+function confirmarDestino() {
+
+    if (destinoLat === null) {
+
+        alert(
+            "Selecciona el destino."
+        );
+
+        return;
+
+    }
+
+    document
+        .getElementById(
+            "pasoDestino"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "pasoVehiculo"
+        )
+        .classList.remove("hidden");
+
+    calcularRuta();
+
+}
+
+function seleccionarVehiculo(tipo) {
+
+    tipoVehiculo = tipo;
+
+    document
+        .querySelectorAll(".vehicle")
+        .forEach(
+            e =>
+                e.classList.remove(
+                    "active"
+                )
+        );
+
+    document
+        .getElementById(tipo)
+        .classList.add("active");
+
+    calcularRuta();
+
+}
+
+
+/* =====================================================
+   RUTA PASAJERO
+===================================================== */
+
+async function calcularRuta() {
+
+    if (
+        recogidaLat === null ||
+        destinoLat === null
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const url =
+            "https://router.project-osrm.org/route/v1/driving/" +
+            recogidaLng +
+            "," +
+            recogidaLat +
+            ";" +
+            destinoLng +
+            "," +
+            destinoLat +
+            "?overview=full&geometries=geojson";
+
+        const respuesta =
+            await fetch(url);
+
+        const datos =
+            await respuesta.json();
+
+        if (
+            !datos.routes ||
+            !datos.routes.length
+        ) {
+
+            throw new Error(
+                "No se encontró una ruta."
+            );
+
+        }
+
+        const ruta =
+            datos.routes[0];
+
+        distanciaActual =
+            ruta.distance / 1000;
+
+        minutosActuales =
+            Math.ceil(
+                ruta.duration / 60
+            );
+
+        const base =
+            tipoVehiculo === "motor"
+                ? 40
+                : 60;
+
+        const precioKm =
+            tipoVehiculo === "motor"
+                ? 20
+                : 28;
+
+        precioActual =
+            Math.round(
+                base +
+                distanciaActual *
+                precioKm
+            );
+
+        document
+            .getElementById("precio")
+            .innerText =
+                "RD$" +
+                precioActual;
+
+        document
+            .getElementById("rutaInfo")
+            .innerText =
+                distanciaActual.toFixed(1) +
+                " km • " +
+                minutosActuales +
+                " min";
+
+        if (rutaLayer) {
+
+            map.removeLayer(
+                rutaLayer
+            );
+
+        }
+
+        rutaLayer =
+            L.geoJSON(
+                ruta.geometry
+            )
+            .addTo(map);
+
+        map.fitBounds(
+            rutaLayer.getBounds(),
+            {
+                padding: [30, 120]
+            }
+        );
+
+    } catch(error) {
+
+        console.error(
+            "Error ruta:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   SOLICITAR VIAJE
+===================================================== */
+
+async function solicitarViaje() {
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "pasajero"
+    ) {
+
+        alert(
+            "Debes iniciar sesión como pasajero."
+        );
+
+        return;
+
+    }
+
+    if (
+        recogidaLat === null ||
+        destinoLat === null
+    ) {
+
+        alert(
+            "Selecciona recogida y destino."
+        );
+
+        return;
+
+    }
+
+    const recogida =
+        document
+            .getElementById(
+                "inputRecogida"
+            )
+            .value.trim();
+
+    const destino =
+        document
+            .getElementById(
+                "inputDestino"
+            )
+            .value.trim();
+
+    const boton =
+        document
+            .getElementById(
+                "btnSolicitar"
+            );
+
+    boton.disabled = true;
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            pasajero_id:
+                                usuarioActual.id,
+
+                            recogida,
+                            destino,
+
+                            recogida_lat:
+                                recogidaLat,
+
+                            recogida_lng:
+                                recogidaLng,
+
+                            destino_lat:
+                                destinoLat,
+
+                            destino_lng:
+                                destinoLng,
+
+                            tipo_vehiculo:
+                                tipoVehiculo,
+
+                            distancia:
+                                distanciaActual,
+
+                            minutos:
+                                minutosActuales,
+
+                            precio:
+                                precioActual
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo crear el viaje"
+            );
+
+        }
+
+        viajeActualId =
+            datos.id;
+
+        ultimoEstadoViaje =
+            "buscando_conductor";
+
+        mostrarBuscandoConductor();
+
+        iniciarSeguimientoPasajero();
+
+    } catch(error) {
+
+        alert(
+            error.message
+        );
+
+        boton.disabled = false;
+
+    }
+
+}
+
+
+/* =====================================================
+   SEGUIMIENTO PASAJERO
+===================================================== */
+
+function iniciarSeguimientoPasajero() {
+
+    if (intervaloPasajero) {
+
+        clearInterval(
+            intervaloPasajero
+        );
+
+    }
+
+    comprobarViajePasajero();
+
+    intervaloPasajero =
+        setInterval(
+            comprobarViajePasajero,
+            2000
+        );
+
+}
+
+async function comprobarViajePasajero() {
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "pasajero"
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/pasajero/" +
+                usuarioActual.id +
+                "/activo"
+            );
+
+        if (!respuesta.ok) {
+
+            return;
+
+        }
+
+        const viaje =
+            await respuesta.json();
+
+        if (!viaje) {
+
+            return;
+
+        }
+
+        viajeActualId =
+            viaje.id;
+
+        const estadoAnterior =
+            ultimoEstadoViaje;
+
+        ultimoEstadoViaje =
+            viaje.estado;
+
+        /*
+         * CANCELACIÓN
+         */
+
+        if (
+            viaje.estado === "cancelado"
+        ) {
+
+            detenerSeguimientoPasajero();
+
+            mostrarViajeCanceladoPasajero(
+                viaje
+            );
+
+            return;
+
+        }
+
+        /*
+         * FINALIZADO
+         */
+
+        if (
+            viaje.estado === "finalizado"
+        ) {
+
+            detenerSeguimientoPasajero();
+
+            viajeActualId = null;
+
+            alert(
+                "🏁 El viaje terminó correctamente."
+            );
+
+            mostrarNuevoViajePasajero();
+
+            return;
+
+        }
+
+        /*
+         * BUSCANDO
+         */
+
+        if (
+            viaje.estado ===
+            "buscando_conductor"
+        ) {
+
+            mostrarBuscandoConductor();
+
+            return;
+
+        }
+
+        /*
+         * ACEPTADO / EN CAMINO / RECOGIDO
+         */
+
+        if (
+            viaje.estado === "aceptado" ||
+            viaje.estado === "en_camino" ||
+            viaje.estado === "recogido"
+        ) {
+
+            mostrarConductorPasajero(
+                viaje
+            );
+
+        }
+
+    } catch(error) {
+
+        console.error(
+            "Seguimiento pasajero:",
+            error
+        );
+
+    }
+
+}
+
+function mostrarBuscandoConductor() {
+
+    ocultarTodosPasosPasajero();
+
+    document
+        .getElementById(
+            "pasoBuscando"
+        )
+        .classList.remove("hidden");
+
+    document
+        .getElementById(
+            "estadoPasajero"
+        )
+        .innerText =
+            "🔎 Buscando conductor cercano...";
+
+}
+
+function detenerSeguimientoPasajero() {
+
+    if (intervaloPasajero) {
+
+        clearInterval(
+            intervaloPasajero
+        );
+
+        intervaloPasajero = null;
+
+    }
+
+}
+
+function ocultarTodosPasosPasajero() {
+
+    [
+        "pasoRecogida",
+        "pasoDestino",
+        "pasoVehiculo",
+        "pasoBuscando",
+        "panelConductorAceptado",
+        "canceladoPasajero"
+    ].forEach(id => {
+
+        const elemento =
+            document.getElementById(id);
+
+        if (elemento) {
+
+            elemento.classList.add(
+                "hidden"
+            );
+
+        }
+
+    });
+
+}
+
+
+/* =====================================================
+   CANCELACIÓN PASAJERO
+===================================================== */
+
+function mostrarViajeCanceladoPasajero(viaje) {
+
+    ocultarTodosPasosPasajero();
+
+    document
+        .getElementById(
+            "canceladoPasajero"
+        )
+        .classList.remove("hidden");
+
+    document
+        .getElementById(
+            "motivoCanceladoPasajero"
+        )
+        .innerText =
+            viaje.motivo_cancelacion ||
+            "El viaje fue cancelado.";
+
+    viajeActualId = null;
+
+    if (intervaloChat) {
+
+        clearInterval(
+            intervaloChat
+        );
+
+        intervaloChat = null;
+
+    }
+
+}
+
+function manejarViajeCerrado(estado) {
+
+    detenerSeguimientoPasajero();
+
+    viajeActualId = null;
+
+    if (estado === "cancelado") {
+
+        mostrarViajeCanceladoPasajero({
+            motivo_cancelacion:
+                "El viaje fue cancelado."
+        });
+
+        return;
+
+    }
+
+    mostrarNuevoViajePasajero();
+
+}
+
+function mostrarNuevoViajePasajero() {
+
+    viajeActualId = null;
+
+    ocultarTodosPasosPasajero();
+
+    document
+        .getElementById(
+            "pasoRecogida"
+        )
+        .classList.remove("hidden");
+
+    document
+        .getElementById(
+            "inputRecogida"
+        )
+        .value = "";
+
+    document
+        .getElementById(
+            "inputDestino"
+        )
+        .value = "";
+
+    recogidaLat = null;
+    recogidaLng = null;
+
+    destinoLat = null;
+    destinoLng = null;
+
+    distanciaActual = 0;
+    minutosActuales = 0;
+    precioActual = 0;
+
+}
+
+
+/* =====================================================
+   CONDUCTOR AL PASAJERO
+===================================================== */
+
+function mostrarConductorPasajero(viaje) {
+
+    document
+        .getElementById(
+            "pasoBuscando"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "panelConductorAceptado"
+        )
+        .classList.remove("hidden");
+
+    let estadoTexto =
+        "🚗 Tu conductor aceptó el viaje";
+
+    if (
+        viaje.estado === "en_camino"
+    ) {
+
+        estadoTexto =
+            "🚗 El conductor va en camino";
+
+    }
+
+    if (
+        viaje.estado === "recogido"
+    ) {
+
+        estadoTexto =
+            "👤 Ya estás en el vehículo";
+
+    }
+
+    document
+        .getElementById(
+            "estadoViajePasajero"
+        )
+        .innerText =
+            estadoTexto;
+
+    const nombre =
+        viaje.conductor_nombre ||
+        "Conductor";
+
+    const telefono =
+        viaje.conductor_telefono ||
+        "";
+
+    document
+        .getElementById(
+            "datosConductor"
+        )
+        .innerHTML =
+
+        "<div class='driver-avatar'>👤</div>" +
+
+        "<div class='driver-name'>" +
+        escaparHTML(nombre) +
+        "</div>" +
+
+        "<div class='driver-info'>" +
+        "🚗 Vehículo: " +
+        (
+            viaje.tipo_vehiculo === "motor"
+                ? "Motor"
+                : "Vehículo"
+        ) +
+        "</div>" +
+
+        "<div class='driver-info'>" +
+        "📞 " +
+        (
+            telefono ||
+            "Teléfono no disponible"
+        ) +
+        "</div>" +
+
+        "<div class='clear'></div>";
+
+    const boton =
+        document.getElementById(
+            "btnLlamarConductor"
+        );
+
+    if (telefono) {
+
+        boton.disabled = false;
+
+        boton.onclick =
+            function() {
+
+                window.location.href =
+                    "tel:" + telefono;
+
+            };
+
+    } else {
+
+        boton.disabled = true;
+
+    }
+
+    if (viaje.codigo_verificacion) {
+
+        document
+            .getElementById(
+                "codigoPasajeroBox"
+            )
+            .classList.remove("hidden");
+
+        document
+            .getElementById(
+                "codigoPasajero"
+            )
+            .innerText =
+                viaje.codigo_verificacion;
+
+    }
+
+    iniciarChat();
+
+}
+
+
+/* =====================================================
+   CANCELAR PASAJERO
+===================================================== */
+
+async function cancelarViajePasajero() {
+
+    if (!viajeActualId) {
+
+        return;
+
+    }
+
+    if (
+        !confirm(
+            "¿Quieres cancelar este viaje?"
+        )
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                viajeActualId +
+                "/cancelar",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            usuario_id:
+                                usuarioActual.id,
+
+                            motivo:
+                                "Cancelado por pasajero",
+
+                            tipo_usuario:
+                                "pasajero"
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo cancelar"
+            );
+
+        }
+
+        detenerSeguimientoPasajero();
+
+        mostrarViajeCanceladoPasajero({
+            motivo_cancelacion:
+                "Cancelaste el viaje."
+        });
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   CHAT
+===================================================== */
+
+function iniciarChat() {
+
+    cargarMensajes();
+
+    if (intervaloChat) {
+
+        clearInterval(
+            intervaloChat
+        );
+
+    }
+
+    intervaloChat =
+        setInterval(
+            cargarMensajes,
+            2000
+        );
+
+}
+
+async function cargarMensajes() {
+
+    if (
+        !viajeActualId ||
+        !usuarioActual
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                viajeActualId +
+                "/mensajes"
+            );
+
+        if (!respuesta.ok) {
+
+            return;
+
+        }
+
+        const mensajes =
+            await respuesta.json();
+
+        const contenedor =
+            document.getElementById(
+                "mensajesChat"
+            );
+
+        if (!contenedor) {
+
+            return;
+
+        }
+
+        contenedor.innerHTML = "";
+
+        mensajes.forEach(
+            mensaje => {
+
+                const div =
+                    document.createElement(
+                        "div"
+                    );
+
+                div.className =
+                    "chat-message " +
+                    (
+                        Number(
+                            mensaje.usuario_id
+                        ) ===
+                        Number(
+                            usuarioActual.id
+                        )
+                            ? "chat-me"
+                            : "chat-other"
+                    );
+
+                div.innerText =
+                    mensaje.mensaje;
+
+                contenedor.appendChild(
+                    div
+                );
+
+            }
+        );
+
+        contenedor.scrollTop =
+            contenedor.scrollHeight;
+
+    } catch(error) {
+
+        console.error(
+            "Error chat:",
+            error
+        );
+
+    }
+
+}
+
+function enterChat(event) {
+
+    if (event.key === "Enter") {
+
+        event.preventDefault();
+
+        enviarMensaje();
+
+    }
+
+}
+
+async function enviarMensaje() {
+
+    if (
+        !usuarioActual ||
+        !viajeActualId
+    ) {
+
+        return;
+
+    }
+
+    const input =
+        document.getElementById(
+            "inputChat"
+        );
+
+    const mensaje =
+        input.value.trim();
+
+    if (!mensaje) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                viajeActualId +
+                "/mensajes",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            usuario_id:
+                                usuarioActual.id,
+
+                            mensaje
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo enviar el mensaje"
+            );
+
+        }
+
+        input.value = "";
+
+        cargarMensajes();
+
+    } catch(error) {
+
+        alert(
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   MODO PASAJERO
+===================================================== */
+
+function mostrarPasajero() {
+
+    document
+        .getElementById(
+            "modoConductor"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "modoPasajero"
+        )
+        .classList.remove("hidden");
+
+    document
+        .querySelector(".panel")
+        .classList.remove(
+            "conductor-activo"
+        );
+
+    if (map) {
+
+        map.classList.remove(
+            "mapa-conductor"
+        );
+
+        setTimeout(
+            () =>
+                map.invalidateSize(),
+            200
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   MODO CONDUCTOR
+===================================================== */
+
+function mostrarConductor() {
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "conductor"
+    ) {
+
+        alert(
+            "Debes iniciar sesión como conductor."
+        );
+
+        return;
+
+    }
+
+    document
+        .getElementById(
+            "modoPasajero"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "modoConductor"
+        )
+        .classList.remove("hidden");
+
+    if (map) {
+
+        map.classList.add(
+            "mapa-conductor"
+        );
+
+    }
+
+    document
+        .querySelector(".panel")
+        .classList.add(
+            "conductor-activo"
+        );
+
+    setTimeout(
+        () => {
+
+            if (map) {
+
+                map.invalidateSize();
+
+            }
+
+        },
+        300
+    );
+
+    cargarViajesDisponibles();
+
+}
+
+
+/* =====================================================
+   ESTADO CONDUCTOR
+===================================================== */
+
+function cambiarEstadoConductor() {
+
+    conductorOnline =
+        !conductorOnline;
+
+    const texto =
+        document.getElementById(
+            "textoEstadoConductor"
+        );
+
+    const boton =
+        document.getElementById(
+            "btnEstadoConductor"
+        );
+
+    if (conductorOnline) {
+
+        texto.innerText =
+            "Conectado";
+
+        texto.className =
+            "status-online";
+
+        boton.innerText =
+            "🔴 Desconectarme";
+
+        cargarViajesDisponibles();
+
+        iniciarActualizacionConductor();
+
+        iniciarGPSConductor();
+
+    } else {
+
+        texto.innerText =
+            "Desconectado";
+
+        texto.className =
+            "status-offline";
+
+        boton.innerText =
+            "🟢 Conectarme";
+
+        if (intervaloConductor) {
+
+            clearInterval(
+                intervaloConductor
+            );
+
+            intervaloConductor = null;
+
+        }
+
+        if (intervaloGPSConductor) {
+
+            clearInterval(
+                intervaloGPSConductor
+            );
+
+            intervaloGPSConductor = null;
+
+        }
+
+    }
+
+}
+
+
+/* =====================================================
+   VIAJES DISPONIBLES
+===================================================== */
+
+function iniciarActualizacionConductor() {
+
+    if (intervaloConductor) {
+
+        clearInterval(
+            intervaloConductor
+        );
+
+    }
+
+    intervaloConductor =
+        setInterval(
+            cargarViajesDisponibles,
+            3000
+        );
+
+}
+
+async function cargarViajesDisponibles() {
+
+    if (!conductorOnline) {
+
+        return;
+
+    }
+
+    if (viajeActualId) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/disponibles"
+            );
+
+        const viajes =
+            await respuesta.json();
+
+        const contenedor =
+            document.getElementById(
+                "viajesDisponibles"
+            );
+
+        contenedor.innerHTML = "";
+
+        if (
+            !Array.isArray(viajes) ||
+            viajes.length === 0
+        ) {
+
+            contenedor.innerHTML =
+                "<div class='location-info'>" +
+                "🔎 No hay viajes disponibles." +
+                "</div>";
+
+            return;
+
+        }
+
+        viajes.forEach(
+            viaje => {
+
+                const div =
+                    document.createElement(
+                        "div"
+                    );
+
+                div.className =
+                    "driver-trip";
+
+                div.innerHTML =
+
+                    "<div class='driver-trip-title'>" +
+                    "🚕 Solicitud #" +
+                    viaje.id +
+                    "</div>" +
+
+                    "<div class='driver-trip-row'>" +
+                    "👤 " +
+                    escaparHTML(
+                        viaje.pasajero_nombre ||
+                        "Pasajero"
+                    ) +
+                    "</div>" +
+
+                    "<div class='driver-trip-row'>" +
+                    "📍 " +
+                    escaparHTML(
+                        viaje.recogida ||
+                        ""
+                    ) +
+                    "</div>" +
+
+                    "<div class='driver-trip-row'>" +
+                    "🎯 " +
+                    escaparHTML(
+                        viaje.destino ||
+                        ""
+                    ) +
+                    "</div>" +
+
+                    "<div class='driver-trip-row'>" +
+                    (
+                        viaje.tipo_vehiculo ===
+                        "motor"
+                            ? "🏍️ Motor"
+                            : "🚗 Vehículo"
+                    ) +
+                    "</div>" +
+
+                    "<div class='driver-trip-price'>" +
+                    "RD$" +
+                    Number(
+                        viaje.precio || 0
+                    ).toFixed(0) +
+                    "</div>" +
+
+                    "<button class='button'>" +
+                    "✅ Aceptar viaje" +
+                    "</button>";
+
+                div
+                    .querySelector("button")
+                    .onclick =
+                        () =>
+                            aceptarViaje(
+                                viaje.id
+                            );
+
+                contenedor.appendChild(
+                    div
+                );
+
+            }
+        );
+
+    } catch(error) {
+
+        console.error(
+            "Error viajes:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   ACEPTAR VIAJE
+===================================================== */
+
+async function aceptarViaje(id) {
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "conductor"
+    ) {
+
+        alert(
+            "Debes estar conectado como conductor."
+        );
+
+        return;
+
+    }
+
+    if (
+        !confirm(
+            "¿Quieres aceptar este viaje?"
+        )
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id +
+                "/aceptar",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            conductor_id:
+                                usuarioActual.id
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo aceptar el viaje"
+            );
+
+        }
+
+        viajeActualId =
+            id;
+
+        document
+            .getElementById(
+                "canceladoConductor"
+            )
+            .classList.add("hidden");
+
+        /* AMPLIAR MAPA */
+
+        if (map) {
+
+            map.classList.add(
+                "mapa-conductor"
+            );
+
+        }
+
+        document
+            .querySelector(".panel")
+            .classList.add(
+                "conductor-activo"
+            );
+
+        await mostrarViajeConductor(
+            id
+        );
+
+        iniciarSeguimientoViajeConductor();
+
+        iniciarGPSConductor();
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   MOSTRAR VIAJE CONDUCTOR
+===================================================== */
+
+async function mostrarViajeConductor(id) {
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id
+            );
+
+        const viaje =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                viaje.error ||
+                "No se pudo obtener el viaje"
+            );
+
+        }
+
+        /*
+         * CANCELADO
+         */
+
+        if (
+            viaje.estado === "cancelado"
+        ) {
+
+            mostrarViajeCanceladoConductor(
+                viaje
+            );
+
+            return;
+
+        }
+
+        /*
+         * FINALIZADO
+         */
+
+        if (
+            viaje.estado === "finalizado"
+        ) {
+
+            viajeActualId = null;
+
+            document
+                .getElementById(
+                    "viajeActualConductor"
+                )
+                .classList.add("hidden");
+
+            cargarViajesDisponibles();
+
+            return;
+
+        }
+
+        viajeActualId =
+            viaje.id;
+
+        document
+            .getElementById(
+                "viajeActualConductor"
+            )
+            .classList.remove("hidden");
+
+        let html =
+
+            "<div class='driver-trip-title'>" +
+            "🚕 Viaje #" +
+            viaje.id +
+            "</div>" +
+
+            "<div class='driver-trip-row'>" +
+            "👤 " +
+            escaparHTML(
+                viaje.pasajero_nombre ||
+                "Pasajero"
+            ) +
+            "</div>" +
+
+            "<div class='driver-trip-row'>" +
+            "📍 " +
+            escaparHTML(
+                viaje.recogida ||
+                ""
+            ) +
+            "</div>" +
+
+            "<div class='driver-trip-row'>" +
+            "🎯 " +
+            escaparHTML(
+                viaje.destino ||
+                ""
+            ) +
+            "</div>" +
+
+            "<div class='driver-trip-row'>" +
+            "📌 Estado: " +
+            escaparHTML(
+                viaje.estado ||
+                ""
+            ) +
+            "</div>" +
+
+            "<div class='driver-trip-price'>" +
+            "RD$" +
+            Number(
+                viaje.precio || 0
+            ).toFixed(0) +
+            "</div>";
+
+        if (
+            viaje.estado === "aceptado"
+        ) {
+
+            html +=
+
+                "<button class='button' " +
+                "onclick='irARecogida(" +
+                viaje.id +
+                ")'>" +
+                "🗺️ Ir a recoger pasajero" +
+                "</button>" +
+
+                "<button class='button button-danger' " +
+                "onclick='cancelarViajeConductor(" +
+                viaje.id +
+                ")'>" +
+                "❌ Cancelar viaje" +
+                "</button>";
+
+        }
+
+        if (
+            viaje.estado === "en_camino"
+        ) {
+
+            html +=
+
+                "<div class='location-info'>" +
+                "📍 Dirígete al punto de recogida." +
+                "</div>" +
+
+                "<div class='verificacion'>" +
+
+                "<div class='verificacion-title'>" +
+                "🔐 Código del pasajero" +
+                "</div>" +
+
+                "<div>" +
+                "El pasajero debe darte su código." +
+                "</div>" +
+
+                "<input " +
+                "id='codigoVerificacion' " +
+                "class='codigo-input' " +
+                "maxlength='6' " +
+                "inputmode='numeric' " +
+                "placeholder='Código'>" +
+
+                "<button class='button button-success' " +
+                "onclick='verificarCodigoYRecoger(" +
+                viaje.id +
+                ")'>" +
+                "👤 Verificar código y recoger" +
+                "</button>" +
+
+                "</div>" +
+
+                "<button class='button button-danger' " +
+                "onclick='cancelarViajeConductor(" +
+                viaje.id +
+                ")'>" +
+                "❌ Cancelar viaje" +
+                "</button>";
+
+        }
+
+        if (
+            viaje.estado === "recogido"
+        ) {
+
+            html +=
+
+                "<div class='location-info'>" +
+                "👤 Pasajero recogido correctamente." +
+                "</div>" +
+
+                "<button class='button' " +
+                "onclick='irAlDestino(" +
+                viaje.id +
+                ")'>" +
+                "🗺️ Ir al destino" +
+                "</button>" +
+
+                "<button class='button button-success' " +
+                "onclick='finalizarViaje(" +
+                viaje.id +
+                ")'>" +
+                "🏁 Finalizar viaje" +
+                "</button>";
+
+        }
+
+        document
+            .getElementById(
+                "detalleViajeConductor"
+            )
+            .innerHTML =
+                html;
+
+        /*
+         * RUTA A RECOGIDA
+         */
+
+        if (
+            viaje.estado === "aceptado" ||
+            viaje.estado === "en_camino"
+        ) {
+
+            mostrarRutaARecogida(
+                viaje
+            );
+
+        }
+
+        /*
+         * RUTA AL DESTINO
+         */
+
+        if (
+            viaje.estado === "recogido"
+        ) {
+
+            mostrarRutaAlDestino(
+                viaje
+            );
+
+        }
+
+    } catch(error) {
+
+        console.error(
+            "Error mostrando viaje:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   SEGUIMIENTO VIAJE CONDUCTOR
+===================================================== */
+
+function iniciarSeguimientoViajeConductor() {
+
+    if (intervaloViajeConductor) {
+
+        clearInterval(
+            intervaloViajeConductor
+        );
+
+    }
+
+    intervaloViajeConductor =
+        setInterval(
+            async () => {
+
+                if (
+                    viajeActualId &&
+                    usuarioActual &&
+                    usuarioActual.tipo ===
+                    "conductor"
+                ) {
+
+                    await mostrarViajeConductor(
+                        viajeActualId
+                    );
+
+                }
+
+            },
+            3000
+        );
+
+}
+
+
+/* =====================================================
+   RUTA A RECOGIDA
+===================================================== */
+
+async function irARecogida(id) {
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id
+            );
+
+        const viaje =
+            await respuesta.json();
+
+        mostrarRutaARecogida(
+            viaje
+        );
+
+    } catch(error) {
+
+        console.error(error);
+
+    }
+
+}
+
+async function mostrarRutaARecogida(viaje) {
+
+    if (
+        viaje.recogida_lat === null ||
+        viaje.recogida_lat === undefined ||
+        viaje.recogida_lng === null ||
+        viaje.recogida_lng === undefined
+    ) {
+
+        alert(
+            "El viaje no tiene coordenadas de recogida."
+        );
+
+        return;
+
+    }
+
+    navigator.geolocation.getCurrentPosition(
+
+        async position => {
+
+            await dibujarRuta(
+
+                position.coords.latitude,
+
+                position.coords.longitude,
+
+                Number(
+                    viaje.recogida_lat
+                ),
+
+                Number(
+                    viaje.recogida_lng
+                ),
+
+                true
+
+            );
+
+        },
+
+        () => {
+
+            iniciarMapa(
+                Number(
+                    viaje.recogida_lat
+                ),
+                Number(
+                    viaje.recogida_lng
+                )
+            );
+
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 5000
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   RUTA AL DESTINO
+===================================================== */
+
+async function irAlDestino(id) {
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id
+            );
+
+        const viaje =
+            await respuesta.json();
+
+        mostrarRutaAlDestino(
+            viaje
+        );
+
+    } catch(error) {
+
+        console.error(error);
+
+    }
+
+}
+
+async function mostrarRutaAlDestino(viaje) {
+
+    if (
+        viaje.recogida_lat === null ||
+        viaje.recogida_lng === null ||
+        viaje.destino_lat === null ||
+        viaje.destino_lng === null
+    ) {
+
+        alert(
+            "El viaje no tiene coordenadas completas."
+        );
+
+        return;
+
+    }
+
+    /*
+     * Intentamos usar la posición actual
+     * del conductor como inicio.
+     */
+
+    navigator.geolocation.getCurrentPosition(
+
+        async position => {
+
+            await dibujarRuta(
+
+                position.coords.latitude,
+
+                position.coords.longitude,
+
+                Number(
+                    viaje.destino_lat
+                ),
+
+                Number(
+                    viaje.destino_lng
+                ),
+
+                true
+
+            );
+
+        },
+
+        async () => {
+
+            await dibujarRuta(
+
+                Number(
+                    viaje.recogida_lat
+                ),
+
+                Number(
+                    viaje.recogida_lng
+                ),
+
+                Number(
+                    viaje.destino_lat
+                ),
+
+                Number(
+                    viaje.destino_lng
+                ),
+
+                true
+
+            );
+
+        },
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 5000
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   DIBUJAR RUTA
+===================================================== */
+
+async function dibujarRuta(
+    origenLat,
+    origenLng,
+    destinoLatRuta,
+    destinoLngRuta,
+    ampliarMapa = false
+) {
+
+    try {
+
+        const url =
+            "https://router.project-osrm.org/route/v1/driving/" +
+
+            origenLng +
+            "," +
+            origenLat +
+
+            ";" +
+
+            destinoLngRuta +
+            "," +
+            destinoLatRuta +
+
+            "?overview=full&geometries=geojson";
+
+        const respuesta =
+            await fetch(url);
+
+        const datos =
+            await respuesta.json();
+
+        if (
+            !datos.routes ||
+            !datos.routes.length
+        ) {
+
+            throw new Error(
+                "No se encontró la ruta."
+            );
+
+        }
+
+        const ruta =
+            datos.routes[0];
+
+        if (rutaLayer) {
+
+            map.removeLayer(
+                rutaLayer
+            );
+
+            rutaLayer = null;
+
+        }
+
+        rutaLayer =
+            L.geoJSON(
+                ruta.geometry,
+                {
+                    style: {
+                        weight: 7
+                    }
+                }
+            )
+            .addTo(map);
+
+        /*
+         * MARCADOR DE ORIGEN
+         */
+
+        if (!marcadorConductor) {
+
+            marcadorConductor =
+                L.marker([
+                    origenLat,
+                    origenLng
+                ])
+                .addTo(map);
+
+        } else {
+
+            marcadorConductor.setLatLng([
+                origenLat,
+                origenLng
+            ]);
+
+        }
+
+        /*
+         * AJUSTAR MAPA COMPLETAMENTE
+         */
+
+        if (ampliarMapa) {
+
+            map.invalidateSize();
+
+            setTimeout(
+                () => {
+
+                    map.fitBounds(
+                        rutaLayer.getBounds(),
+                        {
+                            padding: [
+                                80,
+                                80
+                            ],
+                            maxZoom: 17
+                        }
+                    );
+
+                },
+                300
+            );
+
+        }
+
+    } catch(error) {
+
+        console.error(
+            "Error dibujando ruta:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   GPS CONDUCTOR
+===================================================== */
+
+function iniciarGPSConductor() {
+
+    if (!navigator.geolocation) {
+
+        return;
+
+    }
+
+    if (intervaloGPSConductor) {
+
+        clearInterval(
+            intervaloGPSConductor
+        );
+
+    }
+
+    actualizarGPSConductor();
+
+    intervaloGPSConductor =
+        setInterval(
+            actualizarGPSConductor,
+            5000
+        );
+
+}
+
+function actualizarGPSConductor() {
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "conductor" ||
+        !conductorOnline
+    ) {
+
+        return;
+
+    }
+
+    navigator.geolocation.getCurrentPosition(
+
+        position => {
+
+            const lat =
+                position.coords.latitude;
+
+            const lng =
+                position.coords.longitude;
+
+            if (marcadorConductor) {
+
+                marcadorConductor.setLatLng([
+                    lat,
+                    lng
+                ]);
+
+            }
+
+        },
+
+        () => {},
+
+        {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 5000
+        }
+
+    );
+
+}
+
+
+/* =====================================================
+   CANCELAR VIAJE CONDUCTOR
+===================================================== */
+
+async function cancelarViajeConductor(id) {
+
+    if (
+        !confirm(
+            "¿Quieres cancelar este viaje?"
+        )
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id +
+                "/cancelar",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            usuario_id:
+                                usuarioActual.id,
+
+                            motivo:
+                                "Cancelado por conductor",
+
+                            tipo_usuario:
+                                "conductor"
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo cancelar el viaje"
+            );
+
+        }
+
+        mostrarViajeCanceladoConductor({
+            motivo_cancelacion:
+                "Cancelaste el viaje."
+        });
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   MOSTRAR CANCELACION CONDUCTOR
+===================================================== */
+
+function mostrarViajeCanceladoConductor(viaje) {
+
+    viajeActualId = null;
+
+    if (intervaloViajeConductor) {
+
+        clearInterval(
+            intervaloViajeConductor
+        );
+
+        intervaloViajeConductor = null;
+
+    }
+
+    if (rutaLayer && map) {
+
+        map.removeLayer(
+            rutaLayer
+        );
+
+        rutaLayer = null;
+
+    }
+
+    document
+        .getElementById(
+            "viajeActualConductor"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "canceladoConductor"
+        )
+        .classList.remove("hidden");
+
+    document
+        .getElementById(
+            "motivoCanceladoConductor"
+        )
+        .innerText =
+            viaje.motivo_cancelacion ||
+            "El viaje fue cancelado.";
+
+    /*
+     * Después de 5 segundos vuelve
+     * a mostrar las solicitudes.
+     */
+
+    setTimeout(
+        () => {
+
+            document
+                .getElementById(
+                    "canceladoConductor"
+                )
+                .classList.add("hidden");
+
+            if (conductorOnline) {
+
+                cargarViajesDisponibles();
+
+            }
+
+        },
+        5000
+    );
+
+}
+
+
+/* =====================================================
+   VERIFICAR CODIGO
+===================================================== */
+
+async function verificarCodigoYRecoger(id) {
+
+    const input =
+        document.getElementById(
+            "codigoVerificacion"
+        );
+
+    if (!input) {
+
+        return;
+
+    }
+
+    const codigo =
+        input.value.trim();
+
+    if (!codigo) {
+
+        alert(
+            "Introduce el código del pasajero."
+        );
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id +
+                "/verificar",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            conductor_id:
+                                usuarioActual.id,
+
+                            codigo
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "Código incorrecto"
+            );
+
+        }
+
+        await mostrarViajeConductor(
+            id
+        );
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   FINALIZAR VIAJE
+===================================================== */
+
+async function finalizarViaje(id) {
+
+    if (
+        !confirm(
+            "¿Finalizar este viaje?"
+        )
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                id +
+                "/finalizar",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            usuario_id:
+                                usuarioActual.id,
+
+                            tipo_usuario:
+                                "conductor"
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo finalizar"
+            );
+
+        }
+
+        viajeActualId = null;
+
+        if (rutaLayer && map) {
+
+            map.removeLayer(
+                rutaLayer
+            );
+
+            rutaLayer = null;
+
+        }
+
+        document
+            .getElementById(
+                "viajeActualConductor"
+            )
+            .classList.add("hidden");
+
+        alert(
+            "🏁 Viaje finalizado correctamente."
+        );
+
+        cargarViajesDisponibles();
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   RECUPERAR VIAJE ACTIVO
+===================================================== */
+
+async function recuperarViajeActivo() {
+
+    if (!usuarioActual) {
+
+        return;
+
+    }
+
+    try {
+
+        if (
+            usuarioActual.tipo ===
+            "pasajero"
+        ) {
+
+            const respuesta =
+                await fetch(
+                    "/viajes/pasajero/" +
+                    usuarioActual.id +
+                    "/activo"
+                );
+
+            if (!respuesta.ok) {
+
+                return;
+
+            }
+
+            const viaje =
+                await respuesta.json();
+
+            if (viaje) {
+
+                viajeActualId =
+                    viaje.id;
+
+                ultimoEstadoViaje =
+                    viaje.estado;
+
+                if (
+                    viaje.estado ===
+                    "cancelado"
+                ) {
+
+                    mostrarViajeCanceladoPasajero(
+                        viaje
+                    );
+
+                } else if (
+                    viaje.estado ===
+                    "buscando_conductor"
+                ) {
+
+                    mostrarBuscandoConductor();
+
+                    iniciarSeguimientoPasajero();
+
+                } else {
+
+                    mostrarConductorPasajero(
+                        viaje
+                    );
+
+                    iniciarSeguimientoPasajero();
+
+                }
+
+            }
+
+        }
+
+        if (
+            usuarioActual.tipo ===
+            "conductor"
+        ) {
+
+            mostrarConductor();
+
+        }
+
+    } catch(error) {
+
+        console.error(
+            "Error recuperando viaje:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
+   INICIO
+===================================================== */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function() {
+
+        cargarUsuario();
+
+    }
+);
+
+</script>
+
+</body>
+</html>
+```
