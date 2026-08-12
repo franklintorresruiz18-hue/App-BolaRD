@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 
 const database = require("./database");
 
@@ -14,6 +16,76 @@ app.use(
         path.join(__dirname, "frontend")
     )
 );
+
+
+/* =====================================================
+CONFIGURACION DE SUBIDA DE FOTOS
+===================================================== */
+
+const carpetaUploads =
+    path.join(
+        __dirname,
+        "frontend",
+        "uploads"
+    );
+
+if (!fs.existsSync(carpetaUploads)) {
+
+    fs.mkdirSync(
+        carpetaUploads,
+        { recursive: true }
+    );
+
+}
+
+const almacenamiento =
+    multer.diskStorage({
+
+        destination: (
+            req,
+            file,
+            cb
+        ) => {
+
+            cb(
+                null,
+                carpetaUploads
+            );
+
+        },
+
+        filename: (
+            req,
+            file,
+            cb
+        ) => {
+
+            const nombreUnico =
+                Date.now() +
+                "-" +
+                Math.round(
+                    Math.random() * 1e9
+                ) +
+                path.extname(
+                    file.originalname
+                );
+
+            cb(
+                null,
+                nombreUnico
+            );
+
+        }
+
+    });
+
+const subirFotos =
+    multer({
+        storage: almacenamiento,
+        limits: {
+            fileSize: 8 * 1024 * 1024
+        }
+    });
 
 
 /* =====================================================
@@ -135,6 +207,81 @@ function prepararBaseDatos() {
 
     console.log(
         "🗄️ Verificando estructura de la base de datos..."
+    );
+
+
+    /* =====================================
+    COLUMNAS DE USUARIOS
+    ===================================== */
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "documento_identidad",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "foto_documento",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "matricula_vehiculo",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "modelo_vehiculo",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "foto_matricula",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "foto_vehiculo",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "saldo",
+        "REAL DEFAULT 0"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "forma_pago",
+        "TEXT DEFAULT 'efectivo'"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "tarjeta_numero",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "numero_cuenta_banco",
+        "TEXT"
     );
 
 
@@ -281,6 +428,27 @@ function prepararBaseDatos() {
             usuario_id INTEGER NOT NULL,
 
             mensaje TEXT NOT NULL,
+
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+
+        )
+    `);
+
+
+    /* =====================================
+    TABLA RETIROS
+    ===================================== */
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS retiros (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            conductor_id INTEGER NOT NULL,
+
+            monto REAL NOT NULL,
+
+            numero_cuenta_banco TEXT NOT NULL,
 
             fecha DATETIME DEFAULT CURRENT_TIMESTAMP
 
@@ -521,6 +689,195 @@ app.post(
 
 
 /* =====================================================
+REGISTRO (alias de /usuarios que usa el frontend)
+===================================================== */
+
+app.post(
+    "/registro",
+    subirFotos.fields([
+        { name: "foto_documento", maxCount: 1 },
+        { name: "foto_matricula", maxCount: 1 },
+        { name: "foto_vehiculo", maxCount: 1 }
+    ]),
+    (req, res) => {
+
+        const db =
+            database.getDb();
+
+        const {
+            nombre,
+            telefono,
+            email,
+            password,
+            tipo,
+            documento_identidad,
+            matricula_vehiculo,
+            modelo_vehiculo
+        } = req.body;
+
+
+        if (
+            !nombre ||
+            !telefono ||
+            !password ||
+            !tipo
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "Faltan datos obligatorios"
+
+            });
+
+        }
+
+
+        if (
+            tipo !== "pasajero" &&
+            tipo !== "conductor"
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "El tipo debe ser pasajero o conductor"
+
+            });
+
+        }
+
+
+        /* =================================
+        VALIDACIONES EXTRA PARA CONDUCTOR
+        ================================= */
+
+        if (tipo === "conductor") {
+
+            if (
+                !documento_identidad ||
+                !matricula_vehiculo ||
+                !modelo_vehiculo
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Como conductor debes indicar tu documento de identidad, matrícula y modelo del vehículo"
+
+                });
+
+            }
+
+        }
+
+
+        const archivos =
+            req.files || {};
+
+        const fotoDocumento =
+            archivos.foto_documento
+                ? "/uploads/" +
+                  archivos.foto_documento[0].filename
+                : null;
+
+        const fotoMatricula =
+            archivos.foto_matricula
+                ? "/uploads/" +
+                  archivos.foto_matricula[0].filename
+                : null;
+
+        const fotoVehiculo =
+            archivos.foto_vehiculo
+                ? "/uploads/" +
+                  archivos.foto_vehiculo[0].filename
+                : null;
+
+
+        try {
+
+            const stmt =
+                db.prepare(`
+                    INSERT INTO usuarios
+                    (
+                        nombre,
+                        telefono,
+                        email,
+                        password,
+                        tipo,
+
+                        documento_identidad,
+                        foto_documento,
+
+                        matricula_vehiculo,
+                        modelo_vehiculo,
+                        foto_matricula,
+                        foto_vehiculo
+                    )
+                    VALUES
+                    (
+                        ?, ?, ?, ?, ?,
+                        ?, ?,
+                        ?, ?, ?, ?
+                    )
+                `);
+
+
+            stmt.run([
+
+                nombre,
+                telefono,
+                email || null,
+                password,
+                tipo,
+
+                documento_identidad || null,
+                fotoDocumento,
+
+                matricula_vehiculo || null,
+                modelo_vehiculo || null,
+                fotoMatricula,
+                fotoVehiculo
+
+            ]);
+
+
+            stmt.free();
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Usuario registrado correctamente"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR REGISTRANDO USUARIO:",
+                error
+            );
+
+            res.status(400).json({
+
+                error:
+                    "El teléfono o email ya existe",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
 LOGIN
 ===================================================== */
 
@@ -616,6 +973,430 @@ app.post(
 
                 error:
                     "Error interno del servidor",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+OBTENER DATOS DE UN USUARIO (SALDO, FORMA DE PAGO, ETC)
+===================================================== */
+
+app.get(
+    "/usuarios/:id",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+
+                        id,
+                        nombre,
+                        telefono,
+                        email,
+                        tipo,
+
+                        documento_identidad,
+                        foto_documento,
+
+                        matricula_vehiculo,
+                        modelo_vehiculo,
+                        foto_matricula,
+                        foto_vehiculo,
+
+                        saldo,
+                        forma_pago,
+                        tarjeta_numero,
+                        numero_cuenta_banco
+
+                    FROM usuarios
+
+                    WHERE id = ?
+
+                    LIMIT 1
+                `);
+
+
+            stmt.bind([id]);
+
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Usuario no encontrado"
+
+                });
+
+            }
+
+
+            const usuario =
+                stmt.getAsObject();
+
+
+            stmt.free();
+
+
+            res.json(usuario);
+
+        } catch (error) {
+
+            console.error(
+                "ERROR OBTENIENDO USUARIO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo obtener el usuario",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+ACTUALIZAR FORMA DE PAGO (PASAJERO)
+===================================================== */
+
+app.put(
+    "/usuarios/:id/pago",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                forma_pago,
+                tarjeta_numero
+            } = req.body;
+
+
+            if (
+                forma_pago !== "efectivo" &&
+                forma_pago !== "tarjeta"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "La forma de pago debe ser efectivo o tarjeta"
+
+                });
+
+            }
+
+
+            if (
+                forma_pago === "tarjeta" &&
+                !tarjeta_numero
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Debes indicar el número de tarjeta"
+
+                });
+
+            }
+
+
+            db.run(`
+                UPDATE usuarios
+                SET
+                    forma_pago = ?,
+                    tarjeta_numero = ?
+                WHERE id = ?
+            `, [
+
+                forma_pago,
+
+                forma_pago === "tarjeta"
+                    ? tarjeta_numero
+                    : null,
+
+                id
+
+            ]);
+
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Forma de pago actualizada",
+
+                forma_pago
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR ACTUALIZANDO PAGO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo actualizar la forma de pago",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+RETIRAR SALDO (CONDUCTOR)
+===================================================== */
+
+app.put(
+    "/usuarios/:id/retirar",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                numero_cuenta_banco,
+                monto
+            } = req.body;
+
+            const montoNumero =
+                Number(monto);
+
+
+            if (
+                !numero_cuenta_banco ||
+                !numero_cuenta_banco.trim()
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Debes indicar tu número de cuenta bancaria"
+
+                });
+
+            }
+
+
+            if (
+                !montoNumero ||
+                montoNumero <= 0
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "El monto a retirar no es válido"
+
+                });
+
+            }
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT saldo, tipo
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+
+            stmt.bind([id]);
+
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Usuario no encontrado"
+
+                });
+
+            }
+
+
+            const usuario =
+                stmt.getAsObject();
+
+
+            stmt.free();
+
+
+            if (
+                usuario.tipo !== "conductor"
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "Solo los conductores pueden retirar saldo"
+
+                });
+
+            }
+
+
+            if (
+                montoNumero >
+                Number(usuario.saldo || 0)
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "No tienes saldo suficiente para retirar ese monto"
+
+                });
+
+            }
+
+
+            db.run(`
+                UPDATE usuarios
+                SET
+                    saldo = saldo - ?,
+                    numero_cuenta_banco = ?
+                WHERE id = ?
+            `, [
+
+                montoNumero,
+                numero_cuenta_banco.trim(),
+                id
+
+            ]);
+
+
+            const registro =
+                db.prepare(`
+                    INSERT INTO retiros
+                    (
+                        conductor_id,
+                        monto,
+                        numero_cuenta_banco
+                    )
+                    VALUES (?, ?, ?)
+                `);
+
+
+            registro.run([
+
+                id,
+                montoNumero,
+                numero_cuenta_banco.trim()
+
+            ]);
+
+
+            registro.free();
+
+
+            const nuevoSaldo =
+                Number(usuario.saldo || 0) -
+                montoNumero;
+
+
+            database.guardarBaseDatos();
+
+
+            console.log("");
+            console.log(
+                "💸 RETIRO DE SALDO"
+            );
+            console.log(
+                "Conductor:",
+                id
+            );
+            console.log(
+                "Monto:",
+                montoNumero
+            );
+            console.log(
+                "Cuenta:",
+                numero_cuenta_banco
+            );
+            console.log("");
+
+
+            res.json({
+
+                mensaje:
+                    "Retiro procesado correctamente",
+
+                saldo:
+                    nuevoSaldo
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR RETIRANDO SALDO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo procesar el retiro",
 
                 detalle:
                     error.message
@@ -1532,6 +2313,214 @@ app.get(
 
 
 /* =====================================================
+HISTORIAL DE VIAJES DEL CONDUCTOR (RECIENTES)
+===================================================== */
+
+app.get(
+    "/viajes/conductor/:id/historial",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+
+                        v.id,
+
+                        v.recogida,
+
+                        v.destino,
+
+                        v.tipo_vehiculo,
+
+                        v.precio,
+
+                        v.estado,
+
+                        v.fecha,
+
+                        p.nombre
+                            AS pasajero_nombre
+
+                    FROM viajes v
+
+                    LEFT JOIN usuarios p
+                        ON p.id =
+                           v.pasajero_id
+
+                    WHERE v.conductor_id = ?
+
+                    AND v.estado IN
+                    (
+                        'finalizado',
+                        'cancelado'
+                    )
+
+                    ORDER BY v.id DESC
+
+                    LIMIT 20
+                `);
+
+
+            stmt.bind([id]);
+
+
+            const viajes = [];
+
+            while (
+                stmt.step()
+            ) {
+
+                viajes.push(
+                    stmt.getAsObject()
+                );
+
+            }
+
+
+            stmt.free();
+
+
+            res.json(viajes);
+
+        } catch (error) {
+
+            console.error(
+                "ERROR HISTORIAL CONDUCTOR:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo obtener el historial",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+HISTORIAL DE VIAJES DEL PASAJERO (RECIENTES)
+===================================================== */
+
+app.get(
+    "/viajes/pasajero/:id/historial",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+
+                        v.id,
+
+                        v.recogida,
+
+                        v.destino,
+
+                        v.tipo_vehiculo,
+
+                        v.precio,
+
+                        v.estado,
+
+                        v.fecha,
+
+                        c.nombre
+                            AS conductor_nombre
+
+                    FROM viajes v
+
+                    LEFT JOIN usuarios c
+                        ON c.id =
+                           v.conductor_id
+
+                    WHERE v.pasajero_id = ?
+
+                    AND v.estado IN
+                    (
+                        'finalizado',
+                        'cancelado'
+                    )
+
+                    ORDER BY v.id DESC
+
+                    LIMIT 20
+                `);
+
+
+            stmt.bind([id]);
+
+
+            const viajes = [];
+
+            while (
+                stmt.step()
+            ) {
+
+                viajes.push(
+                    stmt.getAsObject()
+                );
+
+            }
+
+
+            stmt.free();
+
+
+            res.json(viajes);
+
+        } catch (error) {
+
+            console.error(
+                "ERROR HISTORIAL PASAJERO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo obtener el historial",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
 ACEPTAR VIAJE
 ===================================================== */
 
@@ -1842,6 +2831,455 @@ app.put(
 
                 error:
                     "No se pudo aceptar el viaje",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+CONDUCTOR SALE HACIA LA RECOGIDA (aceptado -> en_camino)
+===================================================== */
+
+app.put(
+    "/viajes/:id/en-camino",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+
+            const verificar =
+                db.prepare(`
+                    SELECT id, estado
+                    FROM viajes
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+
+            verificar.bind([id]);
+
+
+            if (!verificar.step()) {
+
+                verificar.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+
+            const viaje =
+                verificar.getAsObject();
+
+
+            verificar.free();
+
+
+            if (
+                viaje.estado !==
+                "aceptado"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "El viaje debe estar aceptado antes de marcarlo en camino"
+
+                });
+
+            }
+
+
+            db.run(`
+                UPDATE viajes
+                SET estado = 'en_camino'
+                WHERE id = ?
+            `, [id]);
+
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Estado actualizado",
+
+                estado:
+                    "en_camino"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR EN-CAMINO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo actualizar el viaje",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+VERIFICAR CÓDIGO Y RECOGER PASAJERO
+===================================================== */
+
+app.put(
+    "/viajes/:id/verificar",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                conductor_id,
+                codigo
+            } = req.body;
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+
+                        id,
+                        conductor_id,
+                        estado,
+                        codigo_verificacion
+
+                    FROM viajes
+
+                    WHERE id = ?
+
+                    LIMIT 1
+                `);
+
+
+            stmt.bind([id]);
+
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+
+            const viaje =
+                stmt.getAsObject();
+
+
+            stmt.free();
+
+
+            if (
+                Number(
+                    viaje.conductor_id
+                ) !== Number(conductor_id)
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "No eres el conductor de este viaje"
+
+                });
+
+            }
+
+
+            if (
+                viaje.estado !==
+                "en_camino"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "El conductor debe estar en camino antes de recoger al pasajero"
+
+                });
+
+            }
+
+
+            if (
+                !viaje.codigo_verificacion
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Este viaje no tiene código de verificación"
+
+                });
+
+            }
+
+
+            if (
+                String(codigo).trim() !==
+                String(viaje.codigo_verificacion)
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Código de verificación incorrecto"
+
+                });
+
+            }
+
+
+            db.run(`
+                UPDATE viajes
+                SET
+                    estado = 'recogido',
+                    fecha_recogida =
+                        CURRENT_TIMESTAMP
+                WHERE id = ?
+            `, [id]);
+
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Pasajero recogido correctamente",
+
+                estado:
+                    "recogido"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR VERIFICANDO CODIGO:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo verificar el código",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+FINALIZAR VIAJE
+===================================================== */
+
+app.put(
+    "/viajes/:id/finalizar",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+                        id,
+                        estado,
+                        conductor_id,
+                        precio
+                    FROM viajes
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+
+            stmt.bind([id]);
+
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+
+            const viaje =
+                stmt.getAsObject();
+
+
+            stmt.free();
+
+
+            if (
+                viaje.estado !==
+                "recogido"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "El viaje debe estar recogido antes de finalizar"
+
+                });
+
+            }
+
+
+            db.run(`
+                UPDATE viajes
+                SET
+                    estado = 'finalizado',
+                    fecha_finalizado =
+                        CURRENT_TIMESTAMP
+                WHERE id = ?
+            `, [id]);
+
+
+            /*
+             * ACREDITAR SALDO AL CONDUCTOR
+             */
+
+            let nuevoSaldo = null;
+
+            if (viaje.conductor_id) {
+
+                db.run(`
+                    UPDATE usuarios
+                    SET saldo =
+                        saldo + ?
+                    WHERE id = ?
+                `, [
+
+                    Number(
+                        viaje.precio || 0
+                    ),
+
+                    viaje.conductor_id
+
+                ]);
+
+
+                const saldoStmt =
+                    db.prepare(`
+                        SELECT saldo
+                        FROM usuarios
+                        WHERE id = ?
+                        LIMIT 1
+                    `);
+
+                saldoStmt.bind([
+                    viaje.conductor_id
+                ]);
+
+                if (saldoStmt.step()) {
+
+                    nuevoSaldo =
+                        saldoStmt.getAsObject().saldo;
+
+                }
+
+                saldoStmt.free();
+
+            }
+
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Viaje finalizado correctamente",
+
+                estado:
+                    "finalizado",
+
+                saldo:
+                    nuevoSaldo
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR FINALIZANDO VIAJE:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo finalizar el viaje",
 
                 detalle:
                     error.message
