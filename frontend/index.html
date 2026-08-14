@@ -726,6 +726,82 @@ body {
     margin: 10px 0;
 }
 
+/* ===============================
+   BADGE DE NOTIFICACIÓN (CHAT)
+================================ */
+
+.badge-chat {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #c62828;
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+    box-shadow: 0 0 0 2px white;
+}
+
+/* ===============================
+   PERFIL Y CALIFICACIONES
+================================ */
+
+.avatar-perfil {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+    margin: 0 auto 12px;
+    border: 3px solid #eee;
+}
+
+.avatar-chico {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    float: left;
+    margin-right: 12px;
+}
+
+.estrellas-selector {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    font-size: 40px;
+    margin: 14px 0;
+}
+
+.estrellas-selector span {
+    cursor: pointer;
+    color: #ddd;
+}
+
+.estrellas-selector span.activa {
+    color: #ffb300;
+}
+
+.calificacion-linea {
+    font-size: 13px;
+    color: #777;
+    margin-top: 4px;
+}
+
+.ticket-item {
+    background: #f5f5f5;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
 </style>
 
 </head>
@@ -997,7 +1073,7 @@ body {
 
         </div>
 
-        <div class="mode-buttons">
+        <div id="botonesModo" class="mode-buttons">
 
             <button
                 class="button"
@@ -1091,6 +1167,12 @@ body {
                     Confirmar destino
                 </button>
 
+                <button
+                    class="button button-secondary"
+                    onclick="volverAPasoRecogida()">
+                    ← Atrás
+                </button>
+
             </div>
 
             <div id="pasoVehiculo" class="hidden">
@@ -1158,6 +1240,12 @@ body {
                     class="button"
                     onclick="solicitarViaje()">
                     🚕 Solicitar MiBola
+                </button>
+
+                <button
+                    class="button button-secondary"
+                    onclick="volverAPasoDestino()">
+                    ← Atrás
                 </button>
 
             </div>
@@ -1241,16 +1329,32 @@ body {
                 </div>
 
                 <button
+                    id="btnCancelarViajePasajero"
                     class="button button-danger"
                     onclick="cancelarViajePasajero()">
                     ❌ Cancelar viaje
                 </button>
 
-                <div class="chat">
+                <button
+                    id="btnFinalizarAnticipado"
+                    class="button button-secondary hidden"
+                    onclick="finalizarViajeAnticipado()">
+                    🏁 Finalizar viaje ahora (tarifa reducida)
+                </button>
 
-                    <div class="chat-title">
-                        💬 Chat con el conductor
-                    </div>
+                <button
+                    class="button button-secondary"
+                    style="position:relative;"
+                    onclick="toggleChatPasajero()">
+                    💬 Chat con el conductor
+                    <span
+                        id="badgeChatPasajero"
+                        class="badge-chat hidden">
+                        0
+                    </span>
+                </button>
+
+                <div id="chatPasajeroBox" class="chat hidden">
 
                     <div
                         id="mensajesChat"
@@ -1449,7 +1553,70 @@ body {
 
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- CALIFICACIÓN -->
+
+<div
+    id="modalCalificar"
+    class="auth-screen hidden"
+    style="z-index: 6500;">
+
+    <div class="login-container">
+
+        <div
+            class="login-box"
+            style="max-width: 420px;">
+
+            <div
+                id="tituloCalificar"
+                class="title"
+                style="text-align:center;">
+                🏁 Viaje finalizado
+            </div>
+
+            <div
+                style="text-align:center;
+                color:#777; font-size:14px;">
+                ¿Cómo estuvo tu experiencia?
+            </div>
+
+            <div
+                id="estrellasCalificar"
+                class="estrellas-selector">
+                <span data-valor="1">★</span>
+                <span data-valor="2">★</span>
+                <span data-valor="3">★</span>
+                <span data-valor="4">★</span>
+                <span data-valor="5">★</span>
+            </div>
+
+            <textarea
+                id="comentarioCalificar"
+                class="input"
+                rows="3"
+                style="resize:none;"
+                placeholder="Comentario (opcional)">
+            </textarea>
+
+            <button
+                class="button"
+                onclick="enviarCalificacion()">
+                ✅ Enviar calificación
+            </button>
+
+            <button
+                class="button button-secondary"
+                onclick="cerrarModalCalificacion()">
+                Omitir
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 
 <script>
 
@@ -1502,6 +1669,40 @@ let ultimoEstadoRenderizadoConductor = null;
 let intervaloChatConductor = null;
 
 let viajesDescartados = new Set();
+
+/*
+ * Distancia (en metros) del conductor al
+ * destino, calculada en cada actualización
+ * de navegación. null mientras no se sepa.
+ */
+let distanciaAlDestinoActual = null;
+
+/*
+ * Debe coincidir con UMBRAL_METROS_FINALIZAR
+ * del servidor.
+ */
+const UMBRAL_METROS_FINALIZAR = 150;
+
+/*
+ * Debe coincidir con UMBRAL_METROS_RECOGIDA
+ * del servidor.
+ */
+const UMBRAL_METROS_RECOGIDA = 100;
+
+/*
+ * Distancia (metros) del conductor al punto
+ * de recogida, mientras va en camino a buscar
+ * al pasajero.
+ */
+let distanciaALaRecogidaActual = null;
+
+/*
+ * Cantidad de mensajes ya vistos en cada chat,
+ * para saber cuántos son "nuevos" y mostrar
+ * el badge de notificación.
+ */
+let ultimoConteoMensajesConductor = 0;
+let ultimoConteoMensajesPasajero = 0;
 
 let navegando = false;
 let destinoNavLat = null;
@@ -1907,6 +2108,28 @@ function mostrarAplicacion() {
 
     }
 
+    /*
+     * Cada cuenta ve únicamente su propio
+     * panel: un conductor nunca ve el panel
+     * ni los controles de pasajero, y viceversa.
+     */
+
+    document
+        .getElementById("botonesModo")
+        .classList.add("hidden");
+
+    if (
+        usuarioActual.tipo === "conductor"
+    ) {
+
+        mostrarConductor();
+
+    } else {
+
+        mostrarPasajero();
+
+    }
+
     iniciarMapaInicial();
 
     setTimeout(
@@ -2206,6 +2429,79 @@ function centrarMapaEnBounds(bounds) {
 
 }
 
+function obtenerAlturaPanelNavegacion() {
+
+    const navEl =
+        document.getElementById(
+            "panelNavegacion"
+        );
+
+    if (
+        !navEl ||
+        navEl.classList.contains(
+            "hidden"
+        )
+    ) {
+
+        return 0;
+
+    }
+
+    return (
+        navEl
+            .getBoundingClientRect()
+            .height
+    );
+
+}
+
+function centrarConductorEnPunto(
+    lat,
+    lng,
+    zoom
+) {
+
+    if (!map) {
+
+        return;
+
+    }
+
+    const panelAltura =
+        obtenerAlturaPanel();
+
+    const navAltura =
+        obtenerAlturaPanelNavegacion();
+
+    map.flyToBounds(
+
+        L.latLngBounds([
+            [lat, lng]
+        ]),
+
+        {
+
+            paddingTopLeft: [
+                30,
+                navAltura + 30
+            ],
+
+            paddingBottomRight: [
+                30,
+                panelAltura + 40
+            ],
+
+            maxZoom:
+                zoom || 17,
+
+            duration: 1
+
+        }
+
+    );
+
+}
+
 function crearIconoMapa(
     emoji,
     colorFondo,
@@ -2256,30 +2552,40 @@ function crearIconoMapa(
 
 function crearIconoConductor() {
 
+    /*
+     * Flecha de navegación estilo Waze/Google
+     * Maps. Como el mapa ahora rota según el
+     * rumbo (map.setBearing) y este ícono se
+     * mantiene "de pie" en pantalla, la punta
+     * de la flecha siempre apunta hacia donde
+     * va el conductor.
+     */
+
     return L.divIcon({
 
         className:
             "icono-mapa-personalizado",
 
         html:
-            "<div style='" +
-            "width:40px;" +
-            "height:40px;" +
-            "background:#1976d2;" +
-            "border:3px solid white;" +
-            "border-radius:50%;" +
-            "box-shadow:0 3px 10px rgba(0,0,0,.4);" +
-            "display:flex;" +
-            "align-items:center;" +
-            "justify-content:center;" +
-            "font-size:20px;" +
-            "'>" +
-            "🚗" +
-            "</div>",
+            "<svg width='46' height='46' " +
+            "viewBox='0 0 46 46' " +
+            "xmlns='http://www.w3.org/2000/svg'>" +
 
-        iconSize: [40, 40],
+            "<circle cx='23' cy='23' r='20' " +
+            "fill='rgba(25,118,210,0.22)' />" +
 
-        iconAnchor: [20, 20]
+            "<polygon " +
+            "points='23,6 36,34 23,27 10,34' " +
+            "fill='#1976d2' " +
+            "stroke='white' " +
+            "stroke-width='2.5' " +
+            "stroke-linejoin='round' />" +
+
+            "</svg>",
+
+        iconSize: [46, 46],
+
+        iconAnchor: [23, 23]
 
     });
 
@@ -2296,7 +2602,21 @@ function iniciarMapa(lat, lng) {
                     zoomControl: false,
                     zoomAnimation: true,
                     fadeAnimation: true,
-                    markerZoomAnimation: true
+                    markerZoomAnimation: true,
+
+                    /*
+                     * Rotación estilo Waze: el mapa
+                     * gira según el rumbo del conductor.
+                     * Se controla solo por código
+                     * (map.setBearing), no con gestos,
+                     * para que no gire por accidente.
+                     */
+
+                    rotate: true,
+                    bearing: 0,
+                    rotateControl: false,
+                    touchRotate: false,
+                    shiftKeyRotate: false
                 }
             )
                 .setView(
@@ -2832,6 +3152,38 @@ function confirmarDestino() {
 
 }
 
+function volverAPasoRecogida() {
+
+    document
+        .getElementById(
+            "pasoDestino"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "pasoRecogida"
+        )
+        .classList.remove("hidden");
+
+}
+
+function volverAPasoDestino() {
+
+    document
+        .getElementById(
+            "pasoVehiculo"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "pasoDestino"
+        )
+        .classList.remove("hidden");
+
+}
+
 function seleccionarVehiculo(tipo) {
 
     tipoVehiculo = tipo;
@@ -3098,6 +3450,9 @@ async function solicitarViaje() {
         ultimoEstadoViaje =
             "buscando_conductor";
 
+        ultimoConteoMensajesPasajero =
+            0;
+
         mostrarBuscandoConductor();
 
         iniciarSeguimientoPasajero();
@@ -3211,6 +3566,9 @@ async function comprobarViajePasajero() {
 
             detenerSeguimientoPasajero();
 
+            const idViajeTerminado =
+                viaje.id;
+
             viajeActualId = null;
 
             alert(
@@ -3218,6 +3576,11 @@ async function comprobarViajePasajero() {
             );
 
             mostrarNuevoViajePasajero();
+
+            abrirModalCalificacion(
+                idViajeTerminado,
+                "conductor"
+            );
 
             return;
 
@@ -3473,17 +3836,44 @@ function mostrarConductorPasajero(viaje) {
         viaje.conductor_telefono ||
         "";
 
+    const avatarConductor =
+        viaje.conductor_foto
+            ? "<img class='avatar-chico' src='" +
+              viaje.conductor_foto +
+              "'>"
+            : "<div class='driver-avatar'>👤</div>";
+
+    const calificacionConductor =
+        viaje.conductor_calificacion !==
+        undefined &&
+        viaje.conductor_calificacion !== null
+            ? "<div class='calificacion-linea'>" +
+              "⭐ " +
+              Number(
+                  viaje.conductor_calificacion
+              ).toFixed(1) +
+              " (" +
+              (
+                  viaje.conductor_total_calificaciones ||
+                  0
+              ) +
+              " viajes)" +
+              "</div>"
+            : "";
+
     document
         .getElementById(
             "datosConductor"
         )
         .innerHTML =
 
-        "<div class='driver-avatar'>👤</div>" +
+        avatarConductor +
 
         "<div class='driver-name'>" +
         escaparHTML(nombre) +
         "</div>" +
+
+        calificacionConductor +
 
         "<div class='driver-info'>" +
         "🚗 Vehículo: " +
@@ -3541,6 +3931,48 @@ function mostrarConductorPasajero(viaje) {
             )
             .innerText =
                 viaje.codigo_verificacion;
+
+    }
+
+    /*
+     * Antes de recoger al pasajero puede
+     * cancelar. Una vez recogido, ya no tiene
+     * sentido "cancelar" (el viaje ya empezó);
+     * en su lugar puede finalizarlo anticipado
+     * con una tarifa reducida.
+     */
+
+    const botonCancelar =
+        document.getElementById(
+            "btnCancelarViajePasajero"
+        );
+
+    const botonFinalizarAnticipado =
+        document.getElementById(
+            "btnFinalizarAnticipado"
+        );
+
+    if (
+        viaje.estado === "recogido"
+    ) {
+
+        botonCancelar.classList.add(
+            "hidden"
+        );
+
+        botonFinalizarAnticipado.classList.remove(
+            "hidden"
+        );
+
+    } else {
+
+        botonCancelar.classList.remove(
+            "hidden"
+        );
+
+        botonFinalizarAnticipado.classList.add(
+            "hidden"
+        );
 
     }
 
@@ -3625,6 +4057,124 @@ async function cancelarViajePasajero() {
             "❌ " +
             error.message
         );
+
+    }
+
+}
+
+
+/* =====================================================
+   FINALIZAR VIAJE ANTICIPADO (LO PIDE EL PASAJERO)
+===================================================== */
+
+async function finalizarViajeAnticipado() {
+
+    if (!viajeActualId) {
+
+        return;
+
+    }
+
+    if (
+        !confirm(
+            "Si finalizas el viaje ahora (antes de " +
+            "llegar al destino), se te aplicará una " +
+            "tarifa reducida del 30% sobre el precio " +
+            "acordado.\n\n" +
+            "¿Deseas continuar?"
+        )
+    ) {
+
+        return;
+
+    }
+
+    const boton =
+        document.getElementById(
+            "btnFinalizarAnticipado"
+        );
+
+    if (boton) {
+
+        boton.disabled = true;
+
+        boton.innerText =
+            "Finalizando...";
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                viajeActualId +
+                "/finalizar-pasajero",
+                {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            pasajero_id:
+                                usuarioActual.id
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo finalizar el viaje"
+            );
+
+        }
+
+        detenerSeguimientoPasajero();
+
+        const idViajeFinalizado =
+            viajeActualId;
+
+        viajeActualId = null;
+
+        alert(
+            "🏁 Viaje finalizado. " +
+            "Tarifa final: RD$" +
+            Number(datos.precio || 0)
+                .toFixed(0) +
+            " (con reducción aplicada)."
+        );
+
+        mostrarNuevoViajePasajero();
+
+        abrirModalCalificacion(
+            idViajeFinalizado,
+            "conductor"
+        );
+
+    } catch(error) {
+
+        alert(
+            "❌ " +
+            error.message
+        );
+
+        if (boton) {
+
+            boton.disabled = false;
+
+            boton.innerText =
+                "🏁 Finalizar viaje ahora (tarifa reducida)";
+
+        }
 
     }
 
@@ -3731,12 +4281,111 @@ async function cargarMensajes() {
         contenedor.scrollTop =
             contenedor.scrollHeight;
 
+        /*
+         * NOTIFICACIÓN DE MENSAJES NUEVOS
+         */
+
+        const cajaChat =
+            document.getElementById(
+                "chatPasajeroBox"
+            );
+
+        const abierto =
+            cajaChat &&
+            !cajaChat.classList.contains(
+                "hidden"
+            );
+
+        if (abierto) {
+
+            ultimoConteoMensajesPasajero =
+                mensajes.length;
+
+            ocultarBadge(
+                "badgeChatPasajero"
+            );
+
+        } else if (
+            mensajes.length >
+            ultimoConteoMensajesPasajero
+        ) {
+
+            mostrarBadge(
+                "badgeChatPasajero",
+                mensajes.length -
+                ultimoConteoMensajesPasajero
+            );
+
+        }
+
     } catch(error) {
 
         console.error(
             "Error chat:",
             error
         );
+
+    }
+
+}
+
+function toggleChatPasajero() {
+
+    const caja =
+        document.getElementById(
+            "chatPasajeroBox"
+        );
+
+    if (!caja) {
+
+        return;
+
+    }
+
+    caja.classList.toggle("hidden");
+
+    if (
+        !caja.classList.contains("hidden")
+    ) {
+
+        cargarMensajes();
+
+        ocultarBadge(
+            "badgeChatPasajero"
+        );
+
+    }
+
+}
+
+function mostrarBadge(id, cantidad) {
+
+    const badge =
+        document.getElementById(id);
+
+    if (!badge) {
+
+        return;
+
+    }
+
+    badge.innerText =
+        cantidad > 9
+            ? "9+"
+            : String(cantidad);
+
+    badge.classList.remove("hidden");
+
+}
+
+function ocultarBadge(id) {
+
+    const badge =
+        document.getElementById(id);
+
+    if (badge) {
+
+        badge.classList.add("hidden");
 
     }
 
@@ -3856,6 +4505,10 @@ function toggleChatConductor() {
 
         cargarMensajesConductor();
 
+        ocultarBadge(
+            "badgeChatConductor"
+        );
+
     }
 
 }
@@ -3955,6 +4608,43 @@ async function cargarMensajesConductor() {
 
         contenedor.scrollTop =
             contenedor.scrollHeight;
+
+        /*
+         * NOTIFICACIÓN DE MENSAJES NUEVOS
+         */
+
+        const cajaChat =
+            document.getElementById(
+                "chatConductorBox"
+            );
+
+        const abierto =
+            cajaChat &&
+            !cajaChat.classList.contains(
+                "hidden"
+            );
+
+        if (abierto) {
+
+            ultimoConteoMensajesConductor =
+                mensajes.length;
+
+            ocultarBadge(
+                "badgeChatConductor"
+            );
+
+        } else if (
+            mensajes.length >
+            ultimoConteoMensajesConductor
+        ) {
+
+            mostrarBadge(
+                "badgeChatConductor",
+                mensajes.length -
+                ultimoConteoMensajesConductor
+            );
+
+        }
 
     } catch(error) {
 
@@ -4402,6 +5092,16 @@ async function cargarViajesDisponibles() {
                         viaje.pasajero_nombre ||
                         "Pasajero"
                     ) +
+                    (
+                        viaje.pasajero_calificacion !==
+                        undefined &&
+                        viaje.pasajero_calificacion !== null
+                            ? " · ⭐ " +
+                              Number(
+                                  viaje.pasajero_calificacion
+                              ).toFixed(1)
+                            : ""
+                    ) +
                     "</div>" +
 
                     "<div class='driver-trip-row'>" +
@@ -4654,6 +5354,9 @@ async function aceptarViaje(id) {
         ultimoEstadoRenderizadoConductor =
             null;
 
+        ultimoConteoMensajesConductor =
+            0;
+
         document
             .getElementById(
                 "canceladoConductor"
@@ -4847,7 +5550,13 @@ async function mostrarViajeConductor(id) {
 
                 html +=
 
-                    "<div class='verificacion'>" +
+                    "<div id='estadoAcercandoseRecogida' " +
+                    "class='location-info'>" +
+                    "🚗 Dirígete al punto de recogida..." +
+                    "</div>" +
+
+                    "<div id='cajaCodigoRecogida' " +
+                    "class='verificacion hidden'>" +
 
                     "<div class='verificacion-title'>" +
                     "🔐 Código del pasajero" +
@@ -4877,12 +5586,23 @@ async function mostrarViajeConductor(id) {
 
                 html +=
 
-                    "<button class='button button-success' " +
+                    "<div id='cajaFinalizar'>" +
+
+                    "<button id='btnFinalizarViaje' " +
+                    "class='button button-success' " +
+                    "disabled " +
                     "onclick='finalizarViaje(" +
                     viaje.id +
                     ")'>" +
                     "🏁 Finalizar viaje" +
-                    "</button>";
+                    "</button>" +
+
+                    "<div id='textoDistanciaFinalizar' " +
+                    "class='location-info'>" +
+                    "📍 Calculando distancia al destino..." +
+                    "</div>" +
+
+                    "</div>";
 
             }
 
@@ -4893,8 +5613,11 @@ async function mostrarViajeConductor(id) {
             html +=
 
                 "<button class='button button-secondary' " +
+                "style='position:relative;' " +
                 "onclick='toggleChatConductor()'>" +
                 "💬 Chat con el pasajero" +
+                "<span id='badgeChatConductor' " +
+                "class='badge-chat hidden'>0</span>" +
                 "</button>" +
 
                 "<div id='chatConductorBox' " +
@@ -5539,6 +6262,339 @@ function detenerNavegacion() {
         )
         .classList.add("hidden");
 
+    if (
+        map &&
+        typeof map.setBearing ===
+        "function"
+    ) {
+
+        map.setBearing(0);
+
+    }
+
+}
+
+function actualizarBotonCodigoRecogida() {
+
+    const estadoTexto =
+        document.getElementById(
+            "estadoAcercandoseRecogida"
+        );
+
+    const cajaCodigo =
+        document.getElementById(
+            "cajaCodigoRecogida"
+        );
+
+    if (!estadoTexto || !cajaCodigo) {
+
+        return;
+
+    }
+
+    if (distanciaALaRecogidaActual === null) {
+
+        return;
+
+    }
+
+    if (
+        distanciaALaRecogidaActual <=
+        UMBRAL_METROS_RECOGIDA
+    ) {
+
+        estadoTexto.classList.add(
+            "hidden"
+        );
+
+        cajaCodigo.classList.remove(
+            "hidden"
+        );
+
+    } else {
+
+        estadoTexto.classList.remove(
+            "hidden"
+        );
+
+        cajaCodigo.classList.add(
+            "hidden"
+        );
+
+        const restante =
+            distanciaALaRecogidaActual -
+            UMBRAL_METROS_RECOGIDA;
+
+        const restanteTexto =
+            restante > 1000
+                ? (restante / 1000).toFixed(1) +
+                  " km"
+                : Math.round(restante) +
+                  " m";
+
+        estadoTexto.innerText =
+            "🚗 Dirígete al punto de recogida " +
+            "(faltan ~" +
+            restanteTexto +
+            ")";
+
+    }
+
+}
+
+function actualizarBotonFinalizar() {
+
+    const boton =
+        document.getElementById(
+            "btnFinalizarViaje"
+        );
+
+    const texto =
+        document.getElementById(
+            "textoDistanciaFinalizar"
+        );
+
+    if (!boton || !texto) {
+
+        return;
+
+    }
+
+    if (distanciaAlDestinoActual === null) {
+
+        return;
+
+    }
+
+    if (
+        distanciaAlDestinoActual <=
+        UMBRAL_METROS_FINALIZAR
+    ) {
+
+        boton.disabled = false;
+
+        texto.innerHTML =
+            '<span style="color:#166534;">' +
+            "✅ Ya puedes finalizar el viaje" +
+            "</span>";
+
+    } else {
+
+        boton.disabled = true;
+
+        const restante =
+            distanciaAlDestinoActual -
+            UMBRAL_METROS_FINALIZAR;
+
+        const restanteTexto =
+            restante > 1000
+                ? (restante / 1000).toFixed(1) +
+                  " km"
+                : Math.round(restante) +
+                  " m";
+
+        texto.innerText =
+            "🚗 Acércate al destino para finalizar " +
+            "(faltan ~" +
+            restanteTexto +
+            ")";
+
+    }
+
+}
+
+function distanciaMetrosCliente(
+    lat1,
+    lng1,
+    lat2,
+    lng2
+) {
+
+    const R = 6371000;
+
+    const rad =
+        grados =>
+            (grados * Math.PI) / 180;
+
+    const dLat =
+        rad(lat2 - lat1);
+
+    const dLng =
+        rad(lng2 - lng1);
+
+    const a =
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
+        Math.cos(rad(lat1)) *
+        Math.cos(rad(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+    return R * c;
+
+}
+
+function calcularRumbo(
+    lat1,
+    lng1,
+    lat2,
+    lng2
+) {
+
+    const rad =
+        grados =>
+            (grados * Math.PI) / 180;
+
+    const y =
+        Math.sin(rad(lng2 - lng1)) *
+        Math.cos(rad(lat2));
+
+    const x =
+        Math.cos(rad(lat1)) *
+        Math.sin(rad(lat2)) -
+        Math.sin(rad(lat1)) *
+        Math.cos(rad(lat2)) *
+        Math.cos(rad(lng2 - lng1));
+
+    const rumbo =
+        Math.atan2(y, x) *
+        180 / Math.PI;
+
+    return (rumbo + 360) % 360;
+
+}
+
+function calcularPuntoAdelante(
+    lat,
+    lng,
+    rumboGrados,
+    distanciaM
+) {
+
+    const R = 6371000;
+
+    const rad =
+        grados =>
+            (grados * Math.PI) / 180;
+
+    const brng =
+        rad(rumboGrados);
+
+    const lat1 =
+        rad(lat);
+
+    const lng1 =
+        rad(lng);
+
+    const lat2 =
+        Math.asin(
+            Math.sin(lat1) *
+            Math.cos(distanciaM / R) +
+            Math.cos(lat1) *
+            Math.sin(distanciaM / R) *
+            Math.cos(brng)
+        );
+
+    const lng2 =
+        lng1 +
+        Math.atan2(
+            Math.sin(brng) *
+            Math.sin(distanciaM / R) *
+            Math.cos(lat1),
+            Math.cos(distanciaM / R) -
+            Math.sin(lat1) *
+            Math.sin(lat2)
+        );
+
+    return {
+        lat: lat2 * 180 / Math.PI,
+        lng: lng2 * 180 / Math.PI
+    };
+
+}
+
+/*
+ * Calcula hacia dónde apunta la ruta, avanzando
+ * sobre la geometría (array de [lng, lat] de OSRM)
+ * hasta acumular "distanciaObjetivo" metros desde
+ * el inicio, y devuelve el rumbo hacia ese punto.
+ */
+
+function calcularRumboRuta(
+    coordenadas,
+    distanciaObjetivo
+) {
+
+    if (
+        !coordenadas ||
+        coordenadas.length < 2
+    ) {
+
+        return null;
+
+    }
+
+    const inicio =
+        coordenadas[0];
+
+    let acumulado = 0;
+
+    let anterior = inicio;
+
+    for (
+        let i = 1;
+        i < coordenadas.length;
+        i++
+    ) {
+
+        const actual =
+            coordenadas[i];
+
+        acumulado +=
+            distanciaMetrosCliente(
+                anterior[1],
+                anterior[0],
+                actual[1],
+                actual[0]
+            );
+
+        if (
+            acumulado >=
+            distanciaObjetivo
+        ) {
+
+            return calcularRumbo(
+                inicio[1],
+                inicio[0],
+                actual[1],
+                actual[0]
+            );
+
+        }
+
+        anterior = actual;
+
+    }
+
+    const ultimo =
+        coordenadas[
+            coordenadas.length - 1
+        ];
+
+    return calcularRumbo(
+        inicio[1],
+        inicio[0],
+        ultimo[1],
+        ultimo[0]
+    );
+
 }
 
 function traducirInstruccion(maneuver) {
@@ -5718,6 +6774,35 @@ async function actualizarNavegacion(
             )
             .addTo(map);
 
+        /*
+         * RUMBO (HACIA DÓNDE VA EL CONDUCTOR)
+         *
+         * Lo calculamos a partir de la geometría
+         * de la ruta (30 m hacia adelante), no del
+         * compás del teléfono, porque es mucho más
+         * estable cuando el GPS tiene poca precisión.
+         */
+
+        const coordenadasRuta =
+            (
+                ruta.geometry &&
+                ruta.geometry.coordinates
+            ) || [];
+
+        const rumboActual =
+            calcularRumboRuta(
+                coordenadasRuta,
+                30
+            );
+
+        if (rumboActual !== null) {
+
+            map.setBearing(
+                rumboActual
+            );
+
+        }
+
         if (!marcadorConductor) {
 
             marcadorConductor =
@@ -5744,17 +6829,35 @@ async function actualizarNavegacion(
 
         /*
          * SEGUIR AL CONDUCTOR (ESTILO WAZE)
+         *
+         * En vez de centrar exactamente sobre el
+         * conductor, centramos un poco más adelante
+         * en la dirección del rumbo. Así el ícono del
+         * carro queda hacia la parte inferior de la
+         * pantalla y se ve más camino por delante,
+         * igual que en Waze/Google Maps. También
+         * dejamos espacio libre para el panel de
+         * navegación (arriba) y el panel inferior
+         * (abajo).
          */
 
-        map.flyTo(
-            [
-                origenLat,
-                origenLng
-            ],
-            17,
-            {
-                duration: 1.2
-            }
+        const puntoCamara =
+            rumboActual !== null
+                ? calcularPuntoAdelante(
+                    origenLat,
+                    origenLng,
+                    rumboActual,
+                    45
+                )
+                : {
+                    lat: origenLat,
+                    lng: origenLng
+                };
+
+        centrarConductorEnPunto(
+            puntoCamara.lat,
+            puntoCamara.lng,
+            18
         );
 
         /*
@@ -5839,6 +6942,53 @@ async function actualizarNavegacion(
                 )
                 .innerText =
                     "🏁";
+
+        }
+
+        /*
+         * DISTANCIA AL DESTINO (PARA PODER
+         * HABILITAR EL BOTÓN DE FINALIZAR)
+         */
+
+        if (
+            ultimoEstadoRenderizadoConductor ===
+            "recogido"
+        ) {
+
+            distanciaAlDestinoActual =
+                ruta.distance;
+
+            actualizarBotonFinalizar();
+
+        } else {
+
+            distanciaAlDestinoActual =
+                null;
+
+        }
+
+        /*
+         * DISTANCIA A LA RECOGIDA (PARA MOSTRAR
+         * EL CÓDIGO SOLO CUANDO YA LLEGÓ, IGUAL
+         * QUE UBER)
+         */
+
+        if (
+            ultimoEstadoRenderizadoConductor ===
+                "en_camino" ||
+            ultimoEstadoRenderizadoConductor ===
+                "aceptado"
+        ) {
+
+            distanciaALaRecogidaActual =
+                ruta.distance;
+
+            actualizarBotonCodigoRecogida();
+
+        } else {
+
+            distanciaALaRecogidaActual =
+                null;
 
         }
 
@@ -6056,6 +7206,23 @@ async function verificarCodigoYRecoger(id) {
 
     try {
 
+        const posicion =
+            await new Promise(
+                (resolve, reject) => {
+
+                    navigator.geolocation.getCurrentPosition(
+                        resolve,
+                        reject,
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 5000
+                        }
+                    );
+
+                }
+            ).catch(() => null);
+
         const respuesta =
             await fetch(
                 "/viajes/" +
@@ -6073,7 +7240,17 @@ async function verificarCodigoYRecoger(id) {
                             conductor_id:
                                 usuarioActual.id,
 
-                            codigo
+                            codigo,
+
+                            lat:
+                                posicion
+                                    ? posicion.coords.latitude
+                                    : null,
+
+                            lng:
+                                posicion
+                                    ? posicion.coords.longitude
+                                    : null
 
                         })
                 }
@@ -6114,6 +7291,21 @@ async function verificarCodigoYRecoger(id) {
 async function finalizarViaje(id) {
 
     if (
+        distanciaAlDestinoActual !== null &&
+        distanciaAlDestinoActual >
+        UMBRAL_METROS_FINALIZAR
+    ) {
+
+        alert(
+            "🚗 Todavía estás lejos del destino. " +
+            "Acércate un poco más para poder finalizar el viaje."
+        );
+
+        return;
+
+    }
+
+    if (
         !confirm(
             "¿Finalizar este viaje?"
         )
@@ -6123,7 +7315,38 @@ async function finalizarViaje(id) {
 
     }
 
+    const boton =
+        document.getElementById(
+            "btnFinalizarViaje"
+        );
+
+    if (boton) {
+
+        boton.disabled = true;
+
+        boton.innerText =
+            "Finalizando...";
+
+    }
+
     try {
+
+        const posicion =
+            await new Promise(
+                (resolve, reject) => {
+
+                    navigator.geolocation.getCurrentPosition(
+                        resolve,
+                        reject,
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 5000
+                        }
+                    );
+
+                }
+            ).catch(() => null);
 
         const respuesta =
             await fetch(
@@ -6139,11 +7362,18 @@ async function finalizarViaje(id) {
                     body:
                         JSON.stringify({
 
-                            usuario_id:
+                            conductor_id:
                                 usuarioActual.id,
 
-                            tipo_usuario:
-                                "conductor"
+                            lat:
+                                posicion
+                                    ? posicion.coords.latitude
+                                    : null,
+
+                            lng:
+                                posicion
+                                    ? posicion.coords.longitude
+                                    : null
 
                         })
                 }
@@ -6165,6 +7395,8 @@ async function finalizarViaje(id) {
 
         ultimoViajeRenderizadoConductor = null;
         ultimoEstadoRenderizadoConductor = null;
+
+        distanciaAlDestinoActual = null;
 
         detenerNavegacion();
 
@@ -6217,12 +7449,32 @@ async function finalizarViaje(id) {
 
         cargarViajesDisponibles();
 
+        abrirModalCalificacion(
+            id,
+            "pasajero"
+        );
+
     } catch(error) {
 
         alert(
             "❌ " +
             error.message
         );
+
+        const botonError =
+            document.getElementById(
+                "btnFinalizarViaje"
+            );
+
+        if (botonError) {
+
+            botonError.disabled =
+                false;
+
+            botonError.innerText =
+                "🏁 Finalizar viaje";
+
+        }
 
     }
 
@@ -6369,6 +7621,622 @@ function cerrarAjustes() {
 
 
 /* =====================================================
+   PERFIL (COMPARTIDO PASAJERO/CONDUCTOR)
+===================================================== */
+
+function obtenerHtmlSeccionPerfil() {
+
+    return (
+
+        "<div class='ajustes-seccion'>" +
+
+        "<div class='ajustes-titulo'>" +
+        "👤 Mi perfil" +
+        "</div>" +
+
+        "<img id='previewFotoPerfil' " +
+        "class='avatar-perfil' " +
+        "src='' style='display:none;'>" +
+
+        "<div id='sinFotoPerfil' " +
+        "class='avatar-perfil' " +
+        "style='background:#eee; " +
+        "display:flex; align-items:center; " +
+        "justify-content:center; " +
+        "font-size:36px;'>" +
+        "👤" +
+        "</div>" +
+
+        "<div id='calificacionPropia' " +
+        "class='calificacion-linea' " +
+        "style='text-align:center;'>" +
+        "</div>" +
+
+        "<input id='inputFotoPerfil' " +
+        "class='input' type='file' " +
+        "accept='image/*' capture='user' " +
+        "onchange='previsualizarFotoPerfil(this)'>" +
+
+        "<input id='inputNombrePerfil' " +
+        "class='input' type='text' " +
+        "placeholder='Nombre completo'>" +
+
+        "<button class='button' " +
+        "onclick='guardarPerfil()'>" +
+        "💾 Guardar perfil" +
+        "</button>" +
+
+        "<div id='mensajePerfil'></div>" +
+
+        "</div>"
+
+    );
+
+}
+
+function previsualizarFotoPerfil(input) {
+
+    if (
+        !input.files ||
+        !input.files[0]
+    ) {
+
+        return;
+
+    }
+
+    const lector =
+        new FileReader();
+
+    lector.onload =
+        function(evento) {
+
+            const preview =
+                document.getElementById(
+                    "previewFotoPerfil"
+                );
+
+            const sinFoto =
+                document.getElementById(
+                    "sinFotoPerfil"
+                );
+
+            if (preview) {
+
+                preview.src =
+                    evento.target.result;
+
+                preview.style.display =
+                    "block";
+
+            }
+
+            if (sinFoto) {
+
+                sinFoto.style.display =
+                    "none";
+
+            }
+
+        };
+
+    lector.readAsDataURL(
+        input.files[0]
+    );
+
+}
+
+function aplicarDatosPerfilEnAjustes(datos) {
+
+    const nombreInput =
+        document.getElementById(
+            "inputNombrePerfil"
+        );
+
+    if (nombreInput) {
+
+        nombreInput.value =
+            datos.nombre || "";
+
+    }
+
+    const preview =
+        document.getElementById(
+            "previewFotoPerfil"
+        );
+
+    const sinFoto =
+        document.getElementById(
+            "sinFotoPerfil"
+        );
+
+    if (
+        preview &&
+        sinFoto &&
+        datos.foto_perfil
+    ) {
+
+        preview.src =
+            datos.foto_perfil;
+
+        preview.style.display =
+            "block";
+
+        sinFoto.style.display =
+            "none";
+
+    }
+
+    const calificacionDiv =
+        document.getElementById(
+            "calificacionPropia"
+        );
+
+    if (calificacionDiv) {
+
+        const promedio =
+            Number(
+                datos.calificacion_promedio ||
+                5
+            );
+
+        const total =
+            Number(
+                datos.total_calificaciones ||
+                0
+            );
+
+        calificacionDiv.innerText =
+            "⭐ " +
+            promedio.toFixed(1) +
+            (
+                total > 0
+                    ? " (" + total + " calificaciones)"
+                    : " (sin calificaciones aún)"
+            );
+
+    }
+
+}
+
+async function guardarPerfil() {
+
+    const mensaje =
+        document.getElementById(
+            "mensajePerfil"
+        );
+
+    mensaje.innerHTML = "";
+
+    const nombre =
+        document
+            .getElementById(
+                "inputNombrePerfil"
+            )
+            .value.trim();
+
+    const archivo =
+        document.getElementById(
+            "inputFotoPerfil"
+        ).files[0];
+
+    if (!nombre) {
+
+        mensaje.innerHTML =
+            '<div class="error">' +
+            'El nombre no puede estar vacío.' +
+            '</div>';
+
+        return;
+
+    }
+
+    const datosFormulario =
+        new FormData();
+
+    datosFormulario.append(
+        "nombre",
+        nombre
+    );
+
+    if (archivo) {
+
+        datosFormulario.append(
+            "foto_perfil",
+            archivo
+        );
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/usuarios/" +
+                usuarioActual.id +
+                "/perfil",
+                {
+                    method: "PUT",
+                    body:
+                        datosFormulario
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo actualizar el perfil"
+            );
+
+        }
+
+        if (datos.usuario) {
+
+            usuarioActual.nombre =
+                datos.usuario.nombre;
+
+            localStorage.setItem(
+                "mibola_usuario",
+                JSON.stringify(
+                    usuarioActual
+                )
+            );
+
+            document
+                .getElementById(
+                    "nombreUsuario"
+                )
+                .innerText =
+                    usuarioActual.nombre;
+
+            aplicarDatosPerfilEnAjustes(
+                datos.usuario
+            );
+
+        }
+
+        mensaje.innerHTML =
+            '<div class="success">' +
+            '✅ Perfil actualizado.' +
+            '</div>';
+
+    } catch(error) {
+
+        mensaje.innerHTML =
+            '<div class="error">' +
+            escaparHTML(error.message) +
+            '</div>';
+
+    }
+
+}
+
+
+/* =====================================================
+   SOPORTE TÉCNICO Y REPORTES
+===================================================== */
+
+/*
+ * ⚠️ Reemplaza este número por el WhatsApp
+ * real de soporte de MiBola (formato:
+ * código de país + número, sin signos).
+ */
+const WHATSAPP_SOPORTE = "18095551234";
+
+function obtenerHtmlSeccionSoporte() {
+
+    return (
+
+        "<div class='ajustes-seccion'>" +
+
+        "<div class='ajustes-titulo'>" +
+        "🛟 Soporte técnico" +
+        "</div>" +
+
+        "<a href='https://wa.me/" +
+        WHATSAPP_SOPORTE +
+        "' target='_blank' " +
+        "style='text-decoration:none;'>" +
+        "<button class='button button-success' " +
+        "type='button'>" +
+        "💬 Contactar por WhatsApp" +
+        "</button>" +
+        "</a>" +
+
+        "<div class='step' style='margin-top:14px;'>" +
+        "ENVIAR UN REPORTE" +
+        "</div>" +
+
+        "<select id='categoriaSoporte' " +
+        "class='input'>" +
+        "<option value='soporte'>Problema técnico</option>" +
+        "<option value='viaje'>Problema con un viaje</option>" +
+        "<option value='pago'>Problema con un pago</option>" +
+        "<option value='otro'>Otro</option>" +
+        "</select>" +
+
+        "<input id='asuntoSoporte' " +
+        "class='input' type='text' " +
+        "placeholder='Asunto'>" +
+
+        "<textarea id='descripcionSoporte' " +
+        "class='input' rows='3' " +
+        "style='resize:none;' " +
+        "placeholder='Describe el problema...'>" +
+        "</textarea>" +
+
+        "<button class='button' " +
+        "onclick='enviarTicketSoporte()'>" +
+        "📩 Enviar reporte" +
+        "</button>" +
+
+        "<div id='mensajeSoporte'></div>" +
+
+        "<div class='step' style='margin-top:14px;'>" +
+        "MIS REPORTES" +
+        "</div>" +
+
+        "<div id='listaTicketsSoporte'>" +
+        "Cargando..." +
+        "</div>" +
+
+        "</div>"
+
+    );
+
+}
+
+async function enviarTicketSoporte() {
+
+    const mensaje =
+        document.getElementById(
+            "mensajeSoporte"
+        );
+
+    mensaje.innerHTML = "";
+
+    const categoria =
+        document.getElementById(
+            "categoriaSoporte"
+        ).value;
+
+    const asunto =
+        document
+            .getElementById(
+                "asuntoSoporte"
+            )
+            .value.trim();
+
+    const descripcion =
+        document
+            .getElementById(
+                "descripcionSoporte"
+            )
+            .value.trim();
+
+    if (!asunto || !descripcion) {
+
+        mensaje.innerHTML =
+            '<div class="error">' +
+            'Completa el asunto y la descripción.' +
+            '</div>';
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/soporte",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            usuario_id:
+                                usuarioActual.id,
+
+                            nombre_usuario:
+                                usuarioActual.nombre,
+
+                            tipo_usuario:
+                                usuarioActual.tipo,
+
+                            categoria,
+
+                            viaje_id:
+                                viajeIdParaReportar,
+
+                            asunto,
+                            descripcion
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo enviar el reporte"
+            );
+
+        }
+
+        mensaje.innerHTML =
+            '<div class="success">' +
+            '✅ ' +
+            escaparHTML(datos.mensaje) +
+            '</div>';
+
+        document.getElementById(
+            "asuntoSoporte"
+        ).value = "";
+
+        document.getElementById(
+            "descripcionSoporte"
+        ).value = "";
+
+        viajeIdParaReportar = null;
+
+        cargarTicketsSoporte();
+
+    } catch(error) {
+
+        mensaje.innerHTML =
+            '<div class="error">' +
+            escaparHTML(error.message) +
+            '</div>';
+
+    }
+
+}
+
+async function cargarTicketsSoporte() {
+
+    const contenedor =
+        document.getElementById(
+            "listaTicketsSoporte"
+        );
+
+    if (!contenedor) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/soporte/" +
+                usuarioActual.id
+            );
+
+        const tickets =
+            await respuesta.json();
+
+        if (
+            !Array.isArray(tickets) ||
+            tickets.length === 0
+        ) {
+
+            contenedor.innerHTML =
+                "<div class='location-info'>" +
+                "No has enviado reportes." +
+                "</div>";
+
+            return;
+
+        }
+
+        contenedor.innerHTML =
+            tickets.map(
+                ticket =>
+
+                    "<div class='ticket-item'>" +
+
+                    "<b>" +
+                    escaparHTML(
+                        ticket.asunto
+                    ) +
+                    "</b>" +
+
+                    "<div class='fila'>" +
+                    escaparHTML(
+                        ticket.descripcion
+                    ) +
+                    "</div>" +
+
+                    "<div class='fila'>" +
+                    "📌 " +
+                    (
+                        ticket.estado ===
+                        "abierto"
+                            ? "🟡 Abierto"
+                            : "✅ Resuelto"
+                    ) +
+                    "</div>" +
+
+                    "</div>"
+
+            ).join("");
+
+    } catch(error) {
+
+        console.error(
+            "Error cargando tickets:",
+            error
+        );
+
+        contenedor.innerHTML =
+            "<div class='error'>" +
+            "No se pudieron cargar tus reportes." +
+            "</div>";
+
+    }
+
+}
+
+let viajeIdParaReportar = null;
+
+async function reportarViaje(viajeId) {
+
+    viajeIdParaReportar = viajeId;
+
+    abrirAjustes();
+
+    setTimeout(
+        () => {
+
+            const categoriaSelect =
+                document.getElementById(
+                    "categoriaSoporte"
+                );
+
+            const asuntoInput =
+                document.getElementById(
+                    "asuntoSoporte"
+                );
+
+            if (categoriaSelect) {
+
+                categoriaSelect.value =
+                    "viaje";
+
+            }
+
+            if (asuntoInput) {
+
+                asuntoInput.value =
+                    "Problema con el viaje #" +
+                    viajeId;
+
+                asuntoInput.focus();
+
+            }
+
+        },
+        300
+    );
+
+}
+
+
+/* =====================================================
    AJUSTES - PASAJERO
 ===================================================== */
 
@@ -6380,6 +8248,8 @@ async function renderizarAjustesPasajero() {
         );
 
     contenedor.innerHTML =
+
+        obtenerHtmlSeccionPerfil() +
 
         "<div class='ajustes-seccion'>" +
 
@@ -6430,6 +8300,8 @@ async function renderizarAjustesPasajero() {
 
         "</div>" +
 
+        obtenerHtmlSeccionSoporte() +
+
         "<button class='button button-danger' " +
         "onclick='cerrarSesion()'>" +
         "🚪 Cerrar sesión" +
@@ -6466,6 +8338,10 @@ async function renderizarAjustesPasajero() {
 
             }
 
+            aplicarDatosPerfilEnAjustes(
+                datos
+            );
+
         }
 
     } catch(error) {
@@ -6481,6 +8357,8 @@ async function renderizarAjustesPasajero() {
         "pasajero",
         "listaHistorial"
     );
+
+    cargarTicketsSoporte();
 
 }
 
@@ -6611,6 +8489,8 @@ async function renderizarAjustesConductor(seccion) {
 
     contenedor.innerHTML =
 
+        obtenerHtmlSeccionPerfil() +
+
         "<div class='ajustes-seccion'>" +
 
         "<div class='ajustes-titulo'>" +
@@ -6650,7 +8530,14 @@ async function renderizarAjustesConductor(seccion) {
         "Cargando..." +
         "</div>" +
 
-        "</div>";
+        "</div>" +
+
+        obtenerHtmlSeccionSoporte() +
+
+        "<button class='button button-danger' " +
+        "onclick='cerrarSesion()'>" +
+        "🚪 Cerrar sesión" +
+        "</button>";
 
     try {
 
@@ -6691,6 +8578,10 @@ async function renderizarAjustesConductor(seccion) {
 
             }
 
+            aplicarDatosPerfilEnAjustes(
+                datos
+            );
+
         }
 
     } catch(error) {
@@ -6706,6 +8597,8 @@ async function renderizarAjustesConductor(seccion) {
         "conductor",
         "listaHistorial"
     );
+
+    cargarTicketsSoporte();
 
 }
 
@@ -6987,6 +8880,15 @@ async function cargarHistorial(
                         ).toFixed(0) +
                         "</div>" +
 
+                        "<button class='button button-secondary' " +
+                        "style='margin-top:8px; padding:8px; " +
+                        "font-size:12px;' " +
+                        "onclick='reportarViaje(" +
+                        viaje.id +
+                        ")'>" +
+                        "⚠️ Reportar un problema" +
+                        "</button>" +
+
                         "</div>"
 
                     );
@@ -7005,6 +8907,195 @@ async function cargarHistorial(
             "<div class='error'>" +
             "No se pudo cargar el historial." +
             "</div>";
+
+    }
+
+}
+
+
+/* =====================================================
+   CALIFICACIONES
+===================================================== */
+
+let viajeIdParaCalificar = null;
+let estrellasSeleccionadas = 0;
+
+function abrirModalCalificacion(
+    viajeId,
+    aQuien
+) {
+
+    if (!viajeId) {
+
+        return;
+
+    }
+
+    viajeIdParaCalificar = viajeId;
+    estrellasSeleccionadas = 0;
+
+    document
+        .getElementById(
+            "tituloCalificar"
+        )
+        .innerText =
+            aQuien === "conductor"
+                ? "🚗 Califica a tu conductor"
+                : "👤 Califica a tu pasajero";
+
+    document
+        .getElementById(
+            "comentarioCalificar"
+        )
+        .value = "";
+
+    pintarEstrellas(0);
+
+    document
+        .getElementById(
+            "modalCalificar"
+        )
+        .classList.remove("hidden");
+
+}
+
+function cerrarModalCalificacion() {
+
+    viajeIdParaCalificar = null;
+
+    document
+        .getElementById(
+            "modalCalificar"
+        )
+        .classList.add("hidden");
+
+}
+
+function pintarEstrellas(cantidad) {
+
+    document
+        .querySelectorAll(
+            "#estrellasCalificar span"
+        )
+        .forEach(estrella => {
+
+            const valor =
+                Number(
+                    estrella.dataset.valor
+                );
+
+            estrella.classList.toggle(
+                "activa",
+                valor <= cantidad
+            );
+
+        });
+
+}
+
+document
+    .querySelectorAll(
+        "#estrellasCalificar span"
+    )
+    .forEach(estrella => {
+
+        estrella.addEventListener(
+            "click",
+            () => {
+
+                estrellasSeleccionadas =
+                    Number(
+                        estrella.dataset.valor
+                    );
+
+                pintarEstrellas(
+                    estrellasSeleccionadas
+                );
+
+            }
+        );
+
+    });
+
+async function enviarCalificacion() {
+
+    if (!viajeIdParaCalificar) {
+
+        cerrarModalCalificacion();
+
+        return;
+
+    }
+
+    if (estrellasSeleccionadas < 1) {
+
+        alert(
+            "Selecciona al menos una estrella."
+        );
+
+        return;
+
+    }
+
+    const comentario =
+        document
+            .getElementById(
+                "comentarioCalificar"
+            )
+            .value.trim();
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/viajes/" +
+                viajeIdParaCalificar +
+                "/calificar",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+
+                            calificador_id:
+                                usuarioActual.id,
+
+                            estrellas:
+                                estrellasSeleccionadas,
+
+                            comentario:
+                                comentario ||
+                                null
+
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo enviar la calificación"
+            );
+
+        }
+
+    } catch(error) {
+
+        console.error(
+            "Error calificando viaje:",
+            error
+        );
+
+    } finally {
+
+        cerrarModalCalificacion();
 
     }
 

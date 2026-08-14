@@ -284,6 +284,27 @@ function prepararBaseDatos() {
         "TEXT"
     );
 
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "foto_perfil",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "calificacion_promedio",
+        "REAL DEFAULT 5"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "usuarios",
+        "total_calificaciones",
+        "INTEGER DEFAULT 0"
+    );
+
 
     /* =====================================
     COLUMNAS DE VIAJES
@@ -413,6 +434,20 @@ function prepararBaseDatos() {
         "TEXT"
     );
 
+    agregarColumnaSiNoExiste(
+        db,
+        "viajes",
+        "finalizado_por",
+        "TEXT"
+    );
+
+    agregarColumnaSiNoExiste(
+        db,
+        "viajes",
+        "precio_original",
+        "REAL"
+    );
+
 
     /* =====================================
     TABLA MENSAJES
@@ -456,6 +491,62 @@ function prepararBaseDatos() {
     `);
 
 
+    /* =====================================
+    TABLA CALIFICACIONES
+    ===================================== */
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS calificaciones (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            viaje_id INTEGER NOT NULL,
+
+            calificador_id INTEGER NOT NULL,
+
+            calificado_id INTEGER NOT NULL,
+
+            estrellas INTEGER NOT NULL,
+
+            comentario TEXT,
+
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+
+        )
+    `);
+
+
+    /* =====================================
+    TABLA SOPORTE / REPORTES
+    ===================================== */
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS soporte_tickets (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            usuario_id INTEGER NOT NULL,
+
+            nombre_usuario TEXT,
+
+            tipo_usuario TEXT,
+
+            categoria TEXT DEFAULT 'soporte',
+
+            viaje_id INTEGER,
+
+            asunto TEXT NOT NULL,
+
+            descripcion TEXT NOT NULL,
+
+            estado TEXT DEFAULT 'abierto',
+
+            fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+
+        )
+    `);
+
+
     database.guardarBaseDatos();
 
     console.log(
@@ -478,6 +569,73 @@ function generarCodigoVerificacion() {
     );
 
 }
+
+
+/* =====================================================
+DISTANCIA ENTRE DOS PUNTOS (HAVERSINE)
+===================================================== */
+
+function distanciaMetros(
+    lat1,
+    lng1,
+    lat2,
+    lng2
+) {
+
+    const R = 6371000;
+
+    const radianes =
+        grados =>
+            (grados * Math.PI) / 180;
+
+    const dLat =
+        radianes(lat2 - lat1);
+
+    const dLng =
+        radianes(lng2 - lng1);
+
+    const a =
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
+        Math.cos(radianes(lat1)) *
+        Math.cos(radianes(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+    return R * c;
+
+}
+
+/*
+ * El conductor solo puede finalizar el viaje
+ * si está a esta distancia (o menos) del destino.
+ */
+
+const UMBRAL_METROS_FINALIZAR = 150;
+
+/*
+ * El conductor solo puede verificar el código
+ * (y por lo tanto recoger al pasajero) si está
+ * a esta distancia (o menos) del punto de recogida.
+ */
+
+const UMBRAL_METROS_RECOGIDA = 100;
+
+/*
+ * Si el pasajero decide finalizar el viaje
+ * anticipadamente (antes de llegar al destino),
+ * se le aplica esta tarifa (70% del precio
+ * original, es decir 30% de reducción).
+ */
+
+const PORCENTAJE_FINALIZACION_ANTICIPADA = 0.7;
 
 
 /* =====================================================
@@ -1410,6 +1568,632 @@ app.put(
 
 
 /* =====================================================
+EDITAR PERFIL (NOMBRE Y FOTO DE PERFIL)
+===================================================== */
+
+app.put(
+    "/usuarios/:id/perfil",
+    subirFotos.single("foto_perfil"),
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                nombre,
+                email
+            } = req.body;
+
+
+            const archivo =
+                req.file
+                    ? "/uploads/" +
+                      req.file.filename
+                    : null;
+
+
+            let sql =
+                "UPDATE usuarios SET ";
+
+            const partes = [];
+
+            const parametros = [];
+
+            if (nombre && nombre.trim()) {
+
+                partes.push(
+                    "nombre = ?"
+                );
+
+                parametros.push(
+                    nombre.trim()
+                );
+
+            }
+
+            if (email !== undefined) {
+
+                partes.push(
+                    "email = ?"
+                );
+
+                parametros.push(
+                    email
+                        ? email.trim()
+                        : null
+                );
+
+            }
+
+            if (archivo) {
+
+                partes.push(
+                    "foto_perfil = ?"
+                );
+
+                parametros.push(
+                    archivo
+                );
+
+            }
+
+            if (partes.length === 0) {
+
+                return res.status(400).json({
+
+                    error:
+                        "No hay datos para actualizar"
+
+                });
+
+            }
+
+            sql +=
+                partes.join(", ") +
+                " WHERE id = ?";
+
+            parametros.push(id);
+
+
+            db.run(
+                sql,
+                parametros
+            );
+
+
+            database.guardarBaseDatos();
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+                        id, nombre, telefono, email,
+                        tipo, foto_perfil
+                    FROM usuarios
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+            stmt.bind([id]);
+
+            let usuarioActualizado = null;
+
+            if (stmt.step()) {
+
+                usuarioActualizado =
+                    stmt.getAsObject();
+
+            }
+
+            stmt.free();
+
+
+            res.json({
+
+                mensaje:
+                    "Perfil actualizado correctamente",
+
+                usuario:
+                    usuarioActualizado
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR ACTUALIZANDO PERFIL:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo actualizar el perfil",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+CALIFICAR VIAJE
+===================================================== */
+
+app.post(
+    "/viajes/:id/calificar",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                calificador_id,
+                estrellas,
+                comentario
+            } = req.body;
+
+            const estrellasNumero =
+                Number(estrellas);
+
+
+            if (
+                !calificador_id ||
+                !estrellasNumero ||
+                estrellasNumero < 1 ||
+                estrellasNumero > 5
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Debes enviar una calificación de 1 a 5 estrellas"
+
+                });
+
+            }
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+                        id, pasajero_id, conductor_id, estado
+                    FROM viajes
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+            stmt.bind([id]);
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+            const viaje =
+                stmt.getAsObject();
+
+            stmt.free();
+
+
+            if (
+                viaje.estado !== "finalizado"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Solo puedes calificar viajes finalizados"
+
+                });
+
+            }
+
+
+            let calificadoId = null;
+
+            if (
+                Number(calificador_id) ===
+                Number(viaje.pasajero_id)
+            ) {
+
+                calificadoId =
+                    viaje.conductor_id;
+
+            } else if (
+                Number(calificador_id) ===
+                Number(viaje.conductor_id)
+            ) {
+
+                calificadoId =
+                    viaje.pasajero_id;
+
+            } else {
+
+                return res.status(403).json({
+
+                    error:
+                        "No participaste en este viaje"
+
+                });
+
+            }
+
+            if (!calificadoId) {
+
+                return res.status(400).json({
+
+                    error:
+                        "No hay a quién calificar en este viaje"
+
+                });
+
+            }
+
+
+            /*
+             * Evitar calificar dos veces el
+             * mismo viaje desde el mismo lado.
+             */
+
+            const existente =
+                db.prepare(`
+                    SELECT id
+                    FROM calificaciones
+                    WHERE viaje_id = ?
+                    AND calificador_id = ?
+                    LIMIT 1
+                `);
+
+            existente.bind([
+                id,
+                calificador_id
+            ]);
+
+            const yaCalifico =
+                existente.step();
+
+            existente.free();
+
+            if (yaCalifico) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Ya calificaste este viaje"
+
+                });
+
+            }
+
+
+            const insertar =
+                db.prepare(`
+                    INSERT INTO calificaciones
+                    (
+                        viaje_id,
+                        calificador_id,
+                        calificado_id,
+                        estrellas,
+                        comentario
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                `);
+
+            insertar.run([
+
+                id,
+                calificador_id,
+                calificadoId,
+                estrellasNumero,
+                comentario || null
+
+            ]);
+
+            insertar.free();
+
+
+            /*
+             * RECALCULAR PROMEDIO
+             */
+
+            const promedioStmt =
+                db.prepare(`
+                    SELECT
+                        AVG(estrellas) AS promedio,
+                        COUNT(*) AS total
+                    FROM calificaciones
+                    WHERE calificado_id = ?
+                `);
+
+            promedioStmt.bind([
+                calificadoId
+            ]);
+
+            let promedio = 5;
+            let total = 0;
+
+            if (promedioStmt.step()) {
+
+                const fila =
+                    promedioStmt.getAsObject();
+
+                promedio =
+                    Number(fila.promedio || 5);
+
+                total =
+                    Number(fila.total || 0);
+
+            }
+
+            promedioStmt.free();
+
+
+            db.run(`
+                UPDATE usuarios
+                SET
+                    calificacion_promedio = ?,
+                    total_calificaciones = ?
+                WHERE id = ?
+            `, [
+
+                Math.round(promedio * 10) / 10,
+                total,
+                calificadoId
+
+            ]);
+
+
+            database.guardarBaseDatos();
+
+
+            res.json({
+
+                mensaje:
+                    "Calificación registrada",
+
+                calificacion_promedio:
+                    Math.round(promedio * 10) / 10,
+
+                total_calificaciones:
+                    total
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR CALIFICANDO VIAJE:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo registrar la calificación",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+SOPORTE TÉCNICO / REPORTES
+===================================================== */
+
+app.post(
+    "/soporte",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const {
+                usuario_id,
+                nombre_usuario,
+                tipo_usuario,
+                categoria,
+                viaje_id,
+                asunto,
+                descripcion
+            } = req.body;
+
+
+            if (
+                !usuario_id ||
+                !asunto ||
+                !descripcion
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Faltan datos del reporte"
+
+                });
+
+            }
+
+
+            const stmt =
+                db.prepare(`
+                    INSERT INTO soporte_tickets
+                    (
+                        usuario_id,
+                        nombre_usuario,
+                        tipo_usuario,
+                        categoria,
+                        viaje_id,
+                        asunto,
+                        descripcion
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                `);
+
+            stmt.run([
+
+                usuario_id,
+                nombre_usuario || null,
+                tipo_usuario || null,
+                categoria || "soporte",
+                viaje_id || null,
+                asunto.trim(),
+                descripcion.trim()
+
+            ]);
+
+            stmt.free();
+
+
+            database.guardarBaseDatos();
+
+
+            console.log("");
+            console.log(
+                "🛟 NUEVO TICKET DE SOPORTE"
+            );
+            console.log(
+                "Usuario:",
+                usuario_id
+            );
+            console.log(
+                "Asunto:",
+                asunto
+            );
+            console.log("");
+
+
+            res.json({
+
+                mensaje:
+                    "Tu reporte fue enviado. Te responderemos pronto."
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR CREANDO TICKET:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo enviar el reporte",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+app.get(
+    "/soporte/:usuario_id",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.usuario_id
+                );
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+                        id, categoria, viaje_id,
+                        asunto, descripcion,
+                        estado, fecha
+                    FROM soporte_tickets
+                    WHERE usuario_id = ?
+                    ORDER BY id DESC
+                    LIMIT 20
+                `);
+
+            stmt.bind([id]);
+
+            const tickets = [];
+
+            while (stmt.step()) {
+
+                tickets.push(
+                    stmt.getAsObject()
+                );
+
+            }
+
+            stmt.free();
+
+
+            res.json(tickets);
+
+        } catch (error) {
+
+            console.error(
+                "ERROR OBTENIENDO TICKETS:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudieron obtener tus reportes",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
 CREAR VIAJE
 ===================================================== */
 
@@ -1778,7 +2562,13 @@ app.get(
                             AS pasajero_nombre,
 
                         u.telefono
-                            AS pasajero_telefono
+                            AS pasajero_telefono,
+
+                        u.calificacion_promedio
+                            AS pasajero_calificacion,
+
+                        u.total_calificaciones
+                            AS pasajero_total_calificaciones
 
                     FROM viajes v
 
@@ -1952,6 +2742,15 @@ app.get(
                         p.email
                             AS pasajero_email,
 
+                        p.foto_perfil
+                            AS pasajero_foto,
+
+                        p.calificacion_promedio
+                            AS pasajero_calificacion,
+
+                        p.total_calificaciones
+                            AS pasajero_total_calificaciones,
+
                         c.nombre
                             AS conductor_nombre,
 
@@ -1959,7 +2758,16 @@ app.get(
                             AS conductor_telefono,
 
                         c.email
-                            AS conductor_email
+                            AS conductor_email,
+
+                        c.foto_perfil
+                            AS conductor_foto,
+
+                        c.calificacion_promedio
+                            AS conductor_calificacion,
+
+                        c.total_calificaciones
+                            AS conductor_total_calificaciones
 
                     FROM viajes v
 
@@ -2058,7 +2866,16 @@ app.get(
                             AS conductor_telefono,
 
                         c.email
-                            AS conductor_email
+                            AS conductor_email,
+
+                        c.foto_perfil
+                            AS conductor_foto,
+
+                        c.calificacion_promedio
+                            AS conductor_calificacion,
+
+                        c.total_calificaciones
+                            AS conductor_total_calificaciones
 
                     FROM viajes v
 
@@ -2973,7 +3790,9 @@ app.put(
 
             const {
                 conductor_id,
-                codigo
+                codigo,
+                lat,
+                lng
             } = req.body;
 
 
@@ -2984,7 +3803,9 @@ app.put(
                         id,
                         conductor_id,
                         estado,
-                        codigo_verificacion
+                        codigo_verificacion,
+                        recogida_lat,
+                        recogida_lng
 
                     FROM viajes
 
@@ -3059,6 +3880,63 @@ app.put(
                         "Este viaje no tiene código de verificación"
 
                 });
+
+            }
+
+
+            /*
+             * EL CONDUCTOR SOLO PUEDE VERIFICAR
+             * EL CÓDIGO SI ESTÁ CERCA DE LA RECOGIDA
+             */
+
+            const tieneCoordenadasRecogida =
+                viaje.recogida_lat !== null &&
+                viaje.recogida_lat !== undefined &&
+                viaje.recogida_lng !== null &&
+                viaje.recogida_lng !== undefined;
+
+            if (tieneCoordenadasRecogida) {
+
+                if (
+                    lat === undefined ||
+                    lat === null ||
+                    lng === undefined ||
+                    lng === null
+                ) {
+
+                    return res.status(400).json({
+
+                        error:
+                            "No se pudo confirmar tu ubicación actual"
+
+                    });
+
+                }
+
+                const distancia =
+                    distanciaMetros(
+                        Number(lat),
+                        Number(lng),
+                        Number(viaje.recogida_lat),
+                        Number(viaje.recogida_lng)
+                    );
+
+                if (
+                    distancia >
+                    UMBRAL_METROS_RECOGIDA
+                ) {
+
+                    return res.status(400).json({
+
+                        error:
+                            "Debes estar cerca del punto de recogida para verificar el código",
+
+                        distancia_metros:
+                            Math.round(distancia)
+
+                    });
+
+                }
 
             }
 
@@ -3142,6 +4020,12 @@ app.put(
                     req.params.id
                 );
 
+            const {
+                conductor_id,
+                lat,
+                lng
+            } = req.body;
+
 
             const stmt =
                 db.prepare(`
@@ -3149,7 +4033,9 @@ app.put(
                         id,
                         estado,
                         conductor_id,
-                        precio
+                        precio,
+                        destino_lat,
+                        destino_lng
                     FROM viajes
                     WHERE id = ?
                     LIMIT 1
@@ -3181,6 +4067,23 @@ app.put(
 
 
             if (
+                Number(
+                    viaje.conductor_id
+                ) !==
+                Number(conductor_id)
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "No eres el conductor de este viaje"
+
+                });
+
+            }
+
+
+            if (
                 viaje.estado !==
                 "recogido"
             ) {
@@ -3195,12 +4098,73 @@ app.put(
             }
 
 
+            /*
+             * EL CONDUCTOR SOLO PUEDE FINALIZAR
+             * SI ESTÁ CERCA DEL DESTINO
+             */
+
+            const tieneCoordenadasDestino =
+                viaje.destino_lat !== null &&
+                viaje.destino_lat !== undefined &&
+                viaje.destino_lng !== null &&
+                viaje.destino_lng !== undefined;
+
+            if (
+                tieneCoordenadasDestino &&
+                (
+                    lat === undefined ||
+                    lat === null ||
+                    lng === undefined ||
+                    lng === null
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "No se pudo confirmar tu ubicación actual"
+
+                });
+
+            }
+
+            if (tieneCoordenadasDestino) {
+
+                const distancia =
+                    distanciaMetros(
+                        Number(lat),
+                        Number(lng),
+                        Number(viaje.destino_lat),
+                        Number(viaje.destino_lng)
+                    );
+
+                if (
+                    distancia >
+                    UMBRAL_METROS_FINALIZAR
+                ) {
+
+                    return res.status(400).json({
+
+                        error:
+                            "Debes estar cerca del destino para finalizar el viaje",
+
+                        distancia_metros:
+                            Math.round(distancia)
+
+                    });
+
+                }
+
+            }
+
+
             db.run(`
                 UPDATE viajes
                 SET
                     estado = 'finalizado',
                     fecha_finalizado =
-                        CURRENT_TIMESTAMP
+                        CURRENT_TIMESTAMP,
+                    finalizado_por = 'conductor'
                 WHERE id = ?
             `, [id]);
 
@@ -3273,6 +4237,239 @@ app.put(
 
             console.error(
                 "ERROR FINALIZANDO VIAJE:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo finalizar el viaje",
+
+                detalle:
+                    error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+FINALIZAR VIAJE ANTICIPADAMENTE (LO PIDE EL PASAJERO)
+===================================================== */
+
+app.put(
+    "/viajes/:id/finalizar-pasajero",
+    (req, res) => {
+
+        try {
+
+            const db =
+                database.getDb();
+
+            const id =
+                Number(
+                    req.params.id
+                );
+
+            const {
+                pasajero_id
+            } = req.body;
+
+
+            const stmt =
+                db.prepare(`
+                    SELECT
+                        id,
+                        estado,
+                        pasajero_id,
+                        conductor_id,
+                        precio
+                    FROM viajes
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+
+            stmt.bind([id]);
+
+
+            if (!stmt.step()) {
+
+                stmt.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+
+            const viaje =
+                stmt.getAsObject();
+
+
+            stmt.free();
+
+
+            if (
+                Number(
+                    viaje.pasajero_id
+                ) !==
+                Number(pasajero_id)
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "No eres el pasajero de este viaje"
+
+                });
+
+            }
+
+
+            if (
+                viaje.estado !==
+                "recogido"
+            ) {
+
+                return res.status(400).json({
+
+                    error:
+                        "Solo puedes finalizar el viaje una vez que ya estés a bordo"
+
+                });
+
+            }
+
+
+            const precioOriginal =
+                Number(
+                    viaje.precio || 0
+                );
+
+            const precioReducido =
+                Math.round(
+                    precioOriginal *
+                    PORCENTAJE_FINALIZACION_ANTICIPADA
+                );
+
+
+            db.run(`
+                UPDATE viajes
+                SET
+                    estado = 'finalizado',
+                    fecha_finalizado =
+                        CURRENT_TIMESTAMP,
+                    finalizado_por = 'pasajero_anticipado',
+                    precio_original = ?,
+                    precio = ?
+                WHERE id = ?
+            `, [
+
+                precioOriginal,
+                precioReducido,
+                id
+
+            ]);
+
+
+            /*
+             * ACREDITAR SALDO REDUCIDO AL CONDUCTOR
+             */
+
+            let nuevoSaldo = null;
+
+            if (viaje.conductor_id) {
+
+                db.run(`
+                    UPDATE usuarios
+                    SET saldo =
+                        saldo + ?
+                    WHERE id = ?
+                `, [
+
+                    precioReducido,
+                    viaje.conductor_id
+
+                ]);
+
+
+                const saldoStmt =
+                    db.prepare(`
+                        SELECT saldo
+                        FROM usuarios
+                        WHERE id = ?
+                        LIMIT 1
+                    `);
+
+                saldoStmt.bind([
+                    viaje.conductor_id
+                ]);
+
+                if (saldoStmt.step()) {
+
+                    nuevoSaldo =
+                        saldoStmt.getAsObject().saldo;
+
+                }
+
+                saldoStmt.free();
+
+            }
+
+
+            database.guardarBaseDatos();
+
+
+            console.log("");
+            console.log(
+                "⏹️ VIAJE FINALIZADO ANTICIPADAMENTE POR PASAJERO"
+            );
+            console.log(
+                "Viaje:",
+                id
+            );
+            console.log(
+                "Precio original:",
+                precioOriginal
+            );
+            console.log(
+                "Precio con reducción:",
+                precioReducido
+            );
+            console.log("");
+
+
+            res.json({
+
+                mensaje:
+                    "Viaje finalizado. Se aplicó una tarifa reducida.",
+
+                estado:
+                    "finalizado",
+
+                precio_original:
+                    precioOriginal,
+
+                precio:
+                    precioReducido,
+
+                saldo:
+                    nuevoSaldo
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR FINALIZANDO VIAJE (PASAJERO):",
                 error
             );
 
