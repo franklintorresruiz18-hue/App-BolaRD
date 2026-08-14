@@ -6426,9 +6426,26 @@ function iniciarNavegacion(
             "—";
 
     /*
-     * Primer cálculo inmediato usando
-     * la posición actual del conductor.
+     * Dibujo inmediato usando la mejor posición
+     * disponible (marcador del conductor o centro
+     * del mapa) para que la ruta se vea aunque
+     * el GPS tarde o no esté disponible. Luego
+     * el GPS la va refinando.
      */
+
+    const origenFallback =
+        marcadorConductor
+            ? marcadorConductor.getLatLng()
+            : (map ? map.getCenter() : null);
+
+    if (origenFallback) {
+
+        actualizarNavegacion(
+            origenFallback.lat,
+            origenFallback.lng
+        );
+
+    }
 
     navigator.geolocation.getCurrentPosition(
 
@@ -6441,7 +6458,11 @@ function iniciarNavegacion(
 
         },
 
-        () => {},
+        () => {
+
+            /* ya dibujamos con el origen de respaldo */
+
+        },
 
         {
             enableHighAccuracy: true,
