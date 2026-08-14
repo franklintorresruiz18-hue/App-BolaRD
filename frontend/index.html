@@ -1631,6 +1631,191 @@ let marcadorDestino = null;
 let marcadorConductor = null;
 let rutaLayer = null;
 
+
+/* =====================================================
+   ROUTING (proveedor configurable)
+   - Por defecto OSRM (keyless, funciona ya mismo).
+   - Para producción se recomienda OpenRouteService:
+     pon proveedor = "ors" y tu clave gratis en orsApiKey.
+   - Si el servicio de routing falla, se usa una
+     línea recta de respaldo para que SIEMPRE se
+     vea la ruta hacia el destino.
+===================================================== */
+
+const ROUTING = {
+
+    proveedor: "osrm",
+    orsApiKey: "",
+    osrmUrl:
+        "https://router.project-osrm.org/route/v1/driving/"
+
+};
+
+
+async function obtenerRuta(
+    osLat,
+    osLng,
+    dsLat,
+    dsLng
+) {
+
+    /* 1) OpenRouteService (si está configurado) */
+
+    if (
+        ROUTING.proveedor === "ors" &&
+        ROUTING.orsApiKey
+    ) {
+
+        try {
+
+            const url =
+
+                "https://api.openrouteservice.org/v2/directions/driving-car" +
+                "?api_key=" + ROUTING.orsApiKey +
+                "&start=" + osLng + "," + osLat +
+                "&end=" + dsLng + "," + dsLat;
+
+            const res =
+                await fetch(url);
+
+            const dat =
+                await res.json();
+
+            const coords =
+
+                dat &&
+                dat.features &&
+                dat.features[0] &&
+                dat.features[0].geometry &&
+                dat.features[0].geometry.coordinates;
+
+            if (
+                coords &&
+                coords.length
+            ) {
+
+                return {
+
+                    routes: [
+                        {
+                            geometry: {
+                                type: "LineString",
+                                coordinates: coords
+                            },
+                            legs: []
+                        }
+                    ]
+
+                };
+
+            }
+
+        } catch (e) {
+
+            console.warn(
+                "ORS falló, probando OSRM:",
+                e
+            );
+
+        }
+
+    }
+
+    /* 2) OSRM (keyless) */
+
+    try {
+
+        const url =
+
+            ROUTING.osrmUrl +
+            osLng + "," + osLat + ";" +
+            dsLng + "," + dsLat +
+            "?overview=full&geometries=geojson&steps=true";
+
+        const res =
+            await fetch(url);
+
+        const dat =
+            await res.json();
+
+        if (
+            dat &&
+            dat.routes &&
+            dat.routes.length
+        ) {
+
+            return dat;
+
+        }
+
+    } catch (e) {
+
+        console.warn(
+            "OSRM falló:",
+            e
+        );
+
+    }
+
+    /* 3) Sin routing disponible */
+    return null;
+
+}
+
+
+function lineaRecta(
+    osLat,
+    osLng,
+    dsLat,
+    dsLng
+) {
+
+    return {
+
+        type: "LineString",
+        coordinates: [
+            [osLng, osLat],
+            [dsLng, dsLat]
+        ]
+
+    };
+
+}
+
+
+function haversineKm(
+    lat1,
+    lng1,
+    lat2,
+    lng2
+) {
+
+    const R = 6371;
+
+    const dLat =
+        (lat2 - lat1) * Math.PI / 180;
+
+    const dLng =
+        (lng2 - lng1) * Math.PI / 180;
+
+    const a =
+
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
+
+        Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+
+    return R * 2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+}
+
 let recogidaLat = null;
 let recogidaLng = null;
 
@@ -3223,44 +3408,63 @@ async function calcularRuta() {
 
     try {
 
-        const url =
-            "https://router.project-osrm.org/route/v1/driving/" +
-            recogidaLng +
-            "," +
-            recogidaLat +
-            ";" +
-            destinoLng +
-            "," +
-            destinoLat +
-            "?overview=full&geometries=geojson";
-
-        const respuesta =
-            await fetch(url);
-
         const datos =
-            await respuesta.json();
+            await obtenerRuta(
+                recogidaLat,
+                recogidaLng,
+                destinoLat,
+                destinoLng
+            );
+
+        let ruta;
 
         if (
-            !datos.routes ||
-            !datos.routes.length
+            datos &&
+            datos.routes &&
+            datos.routes.length
         ) {
 
-            throw new Error(
-                "No se encontró una ruta."
-            );
+            ruta = datos.routes[0];
+
+        } else {
+
+            ruta = {
+
+                geometry: lineaRecta(
+                    recogidaLat,
+                    recogidaLng,
+                    destinoLat,
+                    destinoLng
+                ),
+
+                legs: []
+
+            };
 
         }
 
-        const ruta =
-            datos.routes[0];
+        const hayLegs =
+            ruta.legs &&
+            ruta.legs[0];
 
         distanciaActual =
-            ruta.distance / 1000;
+            hayLegs
+                ? ruta.distance / 1000
+                : haversineKm(
+                    recogidaLat,
+                    recogidaLng,
+                    destinoLat,
+                    destinoLng
+                );
 
         minutosActuales =
-            Math.ceil(
-                ruta.duration / 60
-            );
+            hayLegs
+                ? Math.ceil(
+                    ruta.duration / 60
+                  )
+                : Math.ceil(
+                    (distanciaActual / 30) * 60
+                  );
 
         const base =
             tipoVehiculo === "motor"
@@ -6717,38 +6921,56 @@ async function actualizarNavegacion(
 
     try {
 
-        const url =
-            "https://router.project-osrm.org/route/v1/driving/" +
-
-            origenLng +
-            "," +
-            origenLat +
-
-            ";" +
-
-            destinoNavLng +
-            "," +
-            destinoNavLat +
-
-            "?overview=full&geometries=geojson&steps=true";
-
-        const respuesta =
-            await fetch(url);
-
         const datos =
-            await respuesta.json();
+            await obtenerRuta(
+                origenLat,
+                origenLng,
+                destinoNavLat,
+                destinoNavLng
+            );
+
+        let ruta;
 
         if (
-            !datos.routes ||
-            !datos.routes.length
+            datos &&
+            datos.routes &&
+            datos.routes.length
         ) {
 
-            return;
+            ruta = datos.routes[0];
+
+        } else {
+
+            ruta = {
+
+                geometry: lineaRecta(
+                    origenLat,
+                    origenLng,
+                    destinoNavLat,
+                    destinoNavLng
+                ),
+
+                legs: []
+
+            };
+
+            console.warn(
+                "Routing no disponible: usando línea recta de respaldo."
+            );
+
+            const aviso =
+                document.getElementById(
+                    "navInstruccionSecundaria"
+                );
+
+            if (aviso) {
+
+                aviso.innerText =
+                    "Ruta aproximada (sin tráfico)";
+
+            }
 
         }
-
-        const ruta =
-            datos.routes[0];
 
         /*
          * DIBUJAR LA LINEA DE RUTA
