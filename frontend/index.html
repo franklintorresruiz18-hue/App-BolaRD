@@ -802,6 +802,24 @@ body {
     font-size: 13px;
 }
 
+/* Flecha del conductor: overlay fijo centrado en
+   pantalla. NO se descentra al rotar el mapa
+   (el mapa / rutas giran debajo de ella). */
+#flechaConductor {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1500;
+    pointer-events: none;
+}
+
+/* Marcador Leaflet invisible: solo guarda la
+   posición del conductor para el fallback. */
+.marcador-conductor-invisible {
+    display: none;
+}
+
 </style>
 
 </head>
@@ -809,6 +827,14 @@ body {
 <body>
 
 <div id="map" class="hidden"></div>
+
+<!-- Flecha del conductor (overlay fijo centrado) -->
+<div id="flechaConductor" class="hidden">
+    <svg width="46" height="46" viewBox="0 0 46 46" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="23" cy="23" r="20" fill="rgba(255,214,0,0.28)"/>
+        <polygon points="23,6 36,34 23,27 10,34" fill="#FFD400" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+    </svg>
+</div>
 
 <!-- NAVEGACION ESTILO WAZE -->
 
@@ -1653,12 +1679,15 @@ async function obtenerRuta(
     osLat,
     osLng,
     dsLat,
-    dsLng
+    dsLng,
+    proveedor
 ) {
 
     /* El routing ahora lo hace el backend (server.js)
        usando la clave de ORS de forma segura en el
-       servidor. El frontend solo pide la ruta. */
+       servidor. El frontend solo pide la ruta.
+       "proveedor=osrm" fuerza OSRM (trae maneuver
+       para instrucciones en español). */
 
     try {
 
@@ -1668,7 +1697,10 @@ async function obtenerRuta(
             "?oLat=" + osLat +
             "&oLng=" + osLng +
             "&dLat=" + dsLat +
-            "&dLng=" + dsLng;
+            "&dLng=" + dsLng +
+            (proveedor
+                ? "&proveedor=" + proveedor
+                : "");
 
         const res =
             await fetch(url);
@@ -1836,7 +1868,6 @@ let navegando = false;
 let destinoNavLat = null;
 let destinoNavLng = null;
 let etiquetaNavegacion = "";
-
 
 /* =====================================================
    UTILIDADES
@@ -2708,6 +2739,56 @@ function crearIconoConductor() {
         iconAnchor: [23, 23]
 
     });
+
+}
+
+function crearIconoConductorInvisible() {
+
+    /*
+     * Marcador Leaflet invisible: solo guarda la
+     * posición del conductor para el fallback de
+     * origen en actualizarNavegacion. La flecha
+     * VISIBLE es el overlay fijo #flechaConductor
+     * (centrado en pantalla), que no se descentra
+     * cuando el mapa rota.
+     */
+
+    return L.divIcon({
+        className:
+            "marcador-conductor-invisible",
+        html: "",
+        iconSize: [1, 1],
+        iconAnchor: [0, 0]
+    });
+
+}
+
+function apuntarFlechaConductor(rumboGrados) {
+
+    /*
+     * Gira la flecha (overlay fijo centrado) para
+     * que apunte en la dirección de avance. La
+     * flecha apunta arriba por defecto, así que
+     * rotarla por el rumbo (grados horario desde
+     * el norte) la deja apuntando hacia donde va
+     * el conductor. El mapa queda norte-arriba.
+     */
+
+    const el =
+        document.getElementById(
+            "flechaConductor"
+        );
+
+    if (!el) {
+
+        return;
+
+    }
+
+    el.style.transform =
+        "translate(-50%, -50%) rotate(" +
+        rumboGrados +
+        "deg)";
 
 }
 
@@ -5681,6 +5762,36 @@ async function mostrarViajeConductor(id) {
                     viaje.pasajero_nombre ||
                     "Pasajero"
                 ) +
+                "</div>" +
+
+                /* Resumen coherente con el panel de
+                   navegación: recogida, destino y
+                   precio del viaje. */
+                "<div class='location-info'>" +
+                    "📍 <b>Recogida:</b> " +
+                    escaparHTML(
+                        viaje.recogida ||
+                        "—"
+                    ) +
+                "</div>" +
+
+                "<div class='location-info'>" +
+                    "🏁 <b>Destino:</b> " +
+                    escaparHTML(
+                        viaje.destino ||
+                        "—"
+                    ) +
+                "</div>" +
+
+                "<div class='location-info'>" +
+                    "💵 <b>Precio:</b> RD$ " +
+                    (
+                        viaje.precio != null
+                            ? Number(
+                                viaje.precio
+                              ).toFixed(2)
+                            : "—"
+                    ) +
                 "</div>";
 
             if (
@@ -6195,7 +6306,8 @@ function actualizarGPSConductor() {
 function iniciarNavegacion(
     destLat,
     destLng,
-    etiqueta
+    etiqueta,
+    proveedor
 ) {
 
     navegando = true;
@@ -6215,6 +6327,13 @@ function iniciarNavegacion(
     document
         .getElementById(
             "panelNavegacion"
+        )
+        .classList.remove("hidden");
+
+    /* Flecha del conductor (overlay fijo centrado) */
+    document
+        .getElementById(
+            "flechaConductor"
         )
         .classList.remove("hidden");
 
@@ -6249,7 +6368,8 @@ function iniciarNavegacion(
 
         actualizarNavegacion(
             origenFallback.lat,
-            origenFallback.lng
+            origenFallback.lng,
+            proveedor
         );
 
     }
@@ -6260,7 +6380,8 @@ function iniciarNavegacion(
 
             actualizarNavegacion(
                 position.coords.latitude,
-                position.coords.longitude
+                position.coords.longitude,
+                proveedor
             );
 
         },
@@ -6294,6 +6415,21 @@ function detenerNavegacion() {
         )
         .classList.add("hidden");
 
+    /* Ocultar la flecha del conductor */
+    const flechaOcultar =
+        document.getElementById(
+            "flechaConductor"
+        );
+
+    if (flechaOcultar) {
+
+        flechaOcultar.classList.add("hidden");
+
+        flechaOcultar.style.transform =
+            "translate(-50%, -50%) rotate(0deg)";
+
+    }
+
     if (
         map &&
         typeof map.setBearing ===
@@ -6305,6 +6441,7 @@ function detenerNavegacion() {
     }
 
 }
+
 
 function actualizarBotonCodigoRecogida() {
 
@@ -6732,9 +6869,76 @@ function traducirInstruccion(maneuver) {
 
 }
 
+function textoInstruccionNavegacion(paso) {
+
+    /*
+     * Devuelve el texto de la instrucción en
+     * ESPAÑOL. Prefiere traducirInstruccion cuando
+     * el paso trae "maneuver" (ORS a veces no lo
+     * manda, pero OSRM sí, y ahí sale en español:
+     * "Gira a la derecha", etc.). Si no hay
+     * maneuver, usa el "instruction" del proveedor
+     * (ORS con language=es ya lo da en español).
+     */
+
+    if (!paso) {
+
+        return "Continúa de frente";
+
+    }
+
+    const man =
+        paso.maneuver || {};
+
+    const trad =
+        traducirInstruccion(man);
+
+    /* Nombre de la calle (OSRM lo trae en "name";
+       ORS suele dejarlo vacío). Lo pegamos a la
+       instrucción para que suene natural en español:
+       "Gira a la derecha hacia Av. X". */
+
+    const calle =
+        (
+            paso.name &&
+            String(paso.name).trim() &&
+            String(paso.name).trim() !==
+                ""
+        )
+            ? String(paso.name).trim()
+            : null;
+
+    if (man.type) {
+
+        return calle
+            ? trad.texto +
+                " hacia " +
+                calle
+            : trad.texto;
+
+    }
+
+    const instr =
+        (
+            paso.instruction &&
+            paso.instruction.trim()
+        )
+            ? paso.instruction.trim()
+            : (
+                calle
+                    ? trad.texto +
+                        " por " + calle
+                    : trad.texto
+            );
+
+    return instr;
+
+}
+
 async function actualizarNavegacion(
     origenLat,
-    origenLng
+    origenLng,
+    proveedor
 ) {
 
     if (
@@ -6754,7 +6958,8 @@ async function actualizarNavegacion(
                 origenLat,
                 origenLng,
                 destinoNavLat,
-                destinoNavLng
+                destinoNavLng,
+                proveedor
             );
 
         let ruta;
@@ -6845,6 +7050,21 @@ async function actualizarNavegacion(
                 30
             );
 
+        /*
+         * La flecha del conductor (overlay fijo
+         * centrado) gira para apuntar en la
+         * dirección de avance. El mapa se queda
+         * norte-arriba (más estable y sin los
+         * problemas de rotación del pane de
+         * leaflet-rotate).
+         */
+
+        if (rumboActual !== null) {
+
+            apuntarFlechaConductor(rumboActual);
+
+        }
+
         if (!marcadorConductor) {
 
             marcadorConductor =
@@ -6855,7 +7075,7 @@ async function actualizarNavegacion(
                     ],
                     {
                         icon:
-                            crearIconoConductor()
+                            crearIconoConductorInvisible()
                     }
                 )
                 .addTo(map);
@@ -6916,12 +7136,23 @@ async function actualizarNavegacion(
                 .innerText =
                     instruccion.icono;
 
+            /*
+             * Texto real de la instrucción: tanto
+             * ORS como OSRM lo devuelven en
+             * "instruction" (ORS a veces no
+             * incluye "maneuver"). Usamos la
+             * traducción al español cuando hay
+             * maneuver disponible.
+             */
+
             document
                 .getElementById(
                     "navInstruccionPrincipal"
                 )
                 .innerText =
-                    instruccion.texto;
+                    textoInstruccionNavegacion(
+                        siguientePaso
+                    );
 
         }
 

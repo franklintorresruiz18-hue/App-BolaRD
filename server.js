@@ -5516,7 +5516,8 @@ app.get(
             oLat,
             oLng,
             dLat,
-            dLng
+            dLng,
+            proveedor
         } = req.query;
 
         if (
@@ -5538,8 +5539,12 @@ app.get(
         const dsLng = Number(dLng);
 
         /* 1) OpenRouteService (si hay clave) */
+        /* proveedor=osrm salta ORS y usa OSRM directo,
+           porque OSRM devuelve "maneuver" (tipo/modo de
+           giro) útil para traducir instrucciones a
+           español cuando se prefiere OSRM. */
 
-        if (process.env.ORS_API_KEY) {
+        if (process.env.ORS_API_KEY && proveedor !== "osrm") {
 
             try {
 
@@ -5548,7 +5553,8 @@ app.get(
                     "https://api.openrouteservice.org/v2/directions/driving-car" +
                     "?api_key=" + process.env.ORS_API_KEY +
                     "&start=" + osLng + "," + osLat +
-                    "&end=" + dsLng + "," + dsLat;
+                    "&end=" + dsLng + "," + dsLat +
+                    "&language=es";
 
                 const r =
                     await fetch(url);
@@ -5556,26 +5562,118 @@ app.get(
                 const d =
                     await r.json();
 
-                const coords =
+                const feature =
 
                     d &&
                     d.features &&
-                    d.features[0] &&
-                    d.features[0].geometry &&
-                    d.features[0].geometry.coordinates;
+                    d.features[0];
+
+                const coords =
+
+                    feature &&
+                    feature.geometry &&
+                    feature.geometry.coordinates;
 
                 if (coords && coords.length) {
 
+                    const props =
+                        (feature && feature.properties) ||
+                        {};
+
+                    const summary =
+                        props.summary || {};
+
+                    /*
+                     * ORS devuelve la ruta en
+                     * segments[].steps. Las aplanamos
+                     * en un solo arreglo de pasos con
+                     * el maneuver (type/modifier) que
+                     * espera el frontend para mostrar
+                     * las instrucciones de giro.
+                     */
+
+                    const pasos =
+
+                        (props.segments || [])
+                            .reduce(
+                                (acc, seg) =>
+                                    acc.concat(
+                                        seg.steps || []
+                                    ),
+                                []
+                            )
+                            .map(
+                                paso => ({
+
+                                    distance:
+                                        paso.distance,
+
+                                    duration:
+                                        paso.duration,
+
+                                    instruction:
+                                        paso.instruction,
+
+                                    maneuver: {
+
+                                        type:
+                                            paso.maneuver &&
+                                            paso.maneuver.type,
+
+                                        modifier:
+                                            paso.maneuver &&
+                                            paso.maneuver.modifier,
+
+                                        location:
+                                            paso.maneuver &&
+                                            paso.maneuver.location
+
+                                    }
+
+                                })
+                            );
+
                     return res.json({
+
                         routes: [
                             {
+
                                 geometry: {
                                     type: "LineString",
                                     coordinates: coords
                                 },
-                                legs: []
+
+                                distance:
+                                    summary.distance != null
+                                        ? summary.distance
+                                        : null,
+
+                                duration:
+                                    summary.duration != null
+                                        ? summary.duration
+                                        : null,
+
+                                legs: [
+                                    {
+
+                                        distance:
+                                            summary.distance != null
+                                                ? summary.distance
+                                                : null,
+
+                                        duration:
+                                            summary.duration != null
+                                                ? summary.duration
+                                                : null,
+
+                                        steps: pasos
+
+                                    }
+                                ]
+
                             }
                         ]
+
                     });
 
                 }
