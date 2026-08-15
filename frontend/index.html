@@ -2611,31 +2611,13 @@ function centrarConductorEnPunto(
     const navAltura =
         obtenerAlturaPanelNavegacion();
 
-    map.flyToBounds(
-
-        L.latLngBounds([
-            [lat, lng]
-        ]),
-
+    map.setView(
+        [lat, lng],
+        zoom || map.getZoom(),
         {
-
-            paddingTopLeft: [
-                30,
-                navAltura + 30
-            ],
-
-            paddingBottomRight: [
-                30,
-                panelAltura + 40
-            ],
-
-            maxZoom:
-                zoom || 17,
-
-            duration: 1
-
+            animate: true,
+            duration: 0.6
         }
-
     );
 
 }
@@ -6898,33 +6880,17 @@ async function actualizarNavegacion(
         /*
          * SEGUIR AL CONDUCTOR (ESTILO WAZE)
          *
-         * En vez de centrar exactamente sobre el
-         * conductor, centramos un poco más adelante
-         * en la dirección del rumbo. Así el ícono del
-         * carro queda hacia la parte inferior de la
-         * pantalla y se ve más camino por delante,
-         * igual que en Waze/Google Maps. También
-         * dejamos espacio libre para el panel de
-         * navegación (arriba) y el panel inferior
-         * (abajo).
+         * Centramos el mapa exactamente sobre el
+         * conductor, así la flecha queda fija en el
+         * centro de la pantalla. El mapa rota según
+         * el rumbo (map.setBearing), por lo que la
+         * flecha apunta hacia arriba y se ve el
+         * camino por delante.
          */
 
-        const puntoCamara =
-            rumboActual !== null
-                ? calcularPuntoAdelante(
-                    origenLat,
-                    origenLng,
-                    rumboActual,
-                    45
-                )
-                : {
-                    lat: origenLat,
-                    lng: origenLng
-                };
-
         centrarConductorEnPunto(
-            puntoCamara.lat,
-            puntoCamara.lng,
+            origenLat,
+            origenLng,
             18
         );
 
