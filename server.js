@@ -5508,6 +5508,58 @@ async function iniciarServidor() {
    { routes: [ { geometry, legs } ] }.
 ===================================================== */
 
+/* Decodifica la polilínea codificada que devuelve
+   ORS (formato estándar Google, precisión 1e5) a un
+   arreglo de coordenadas [lng, lat] para el GeoJSON. */
+function decodificarPolyline(str) {
+
+    const coords = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < str.length) {
+
+        let result = 1;
+        let shift = 0;
+        let b;
+
+        do {
+            b = str.charCodeAt(index++) - 63 - 1;
+            result += b << shift;
+            shift += 5;
+        } while (b >= 0x1f);
+
+        lat +=
+            (result & 1)
+                ? ~(result >> 1)
+                : (result >> 1);
+
+        result = 1;
+        shift = 0;
+
+        do {
+            b = str.charCodeAt(index++) - 63 - 1;
+            result += b << shift;
+            shift += 5;
+        } while (b >= 0x1f);
+
+        lng +=
+            (result & 1)
+                ? ~(result >> 1)
+                : (result >> 1);
+
+        coords.push([
+            lng / 1e5,
+            lat / 1e5
+        ]);
+
+    }
+
+    return coords;
+
+}
+
 app.get(
     "/api/ruta",
     async (req, res) => {
@@ -5548,53 +5600,67 @@ app.get(
 
             try {
 
+                /* ORS IGNORA "language" cuando se manda
+                   en la query string (GET): siempre
+                   responde las instrucciones en inglés.
+                   Hay que usar POST y enviar
+                   "language":"es" en el body para que
+                   vengan en español. La geometría viene
+                   como polilínea codificada, la
+                   decodificamos a coordenadas GeoJSON. */
+
                 const url =
 
                     "https://api.openrouteservice.org/v2/directions/driving-car" +
-                    "?api_key=" + process.env.ORS_API_KEY +
-                    "&start=" + osLng + "," + osLat +
-                    "&end=" + dsLng + "," + dsLat +
-                    "&language=es";
+                    "?api_key=" + process.env.ORS_API_KEY;
 
                 const r =
-                    await fetch(url);
+                    await fetch(
+                        url,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+                            body: JSON.stringify({
+                                coordinates: [
+                                    [ osLng, osLat ],
+                                    [ dsLng, dsLat ]
+                                ],
+                                language: "es"
+                            })
+                        }
+                    );
 
                 const d =
                     await r.json();
 
-                const feature =
+                const rutaORS =
 
                     d &&
-                    d.features &&
-                    d.features[0];
+                    d.routes &&
+                    d.routes[0];
 
-                const coords =
+                if (
+                    rutaORS &&
+                    rutaORS.geometry
+                ) {
 
-                    feature &&
-                    feature.geometry &&
-                    feature.geometry.coordinates;
-
-                if (coords && coords.length) {
-
-                    const props =
-                        (feature && feature.properties) ||
-                        {};
+                    const coords =
+                        decodificarPolyline(
+                            rutaORS.geometry
+                        );
 
                     const summary =
-                        props.summary || {};
+                        rutaORS.summary || {};
 
-                    /*
-                     * ORS devuelve la ruta en
-                     * segments[].steps. Las aplanamos
-                     * en un solo arreglo de pasos con
-                     * el maneuver (type/modifier) que
-                     * espera el frontend para mostrar
-                     * las instrucciones de giro.
-                     */
+                    const segmentos =
+                        rutaORS.segments || [];
 
                     const pasos =
 
-                        (props.segments || [])
+                        segmentos
                             .reduce(
                                 (acc, seg) =>
                                     acc.concat(
@@ -5611,23 +5677,26 @@ app.get(
                                     duration:
                                         paso.duration,
 
+                                    /* ORS ya trae la
+                                       instrucción en español
+                                       (language=es en el body
+                                       POST). */
                                     instruction:
                                         paso.instruction,
 
+                                    name:
+                                        paso.name,
+
+                                    /* ORS no envía "maneuver"
+                                       (usa un "type" numérico),
+                                       así que lo dejamos nulo
+                                       para que el frontend use
+                                       el texto en español y
+                                       deduzca el ícono desde
+                                       la instrucción. */
                                     maneuver: {
-
-                                        type:
-                                            paso.maneuver &&
-                                            paso.maneuver.type,
-
-                                        modifier:
-                                            paso.maneuver &&
-                                            paso.maneuver.modifier,
-
-                                        location:
-                                            paso.maneuver &&
-                                            paso.maneuver.location
-
+                                        type: null,
+                                        modifier: null
                                     }
 
                                 })

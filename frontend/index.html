@@ -1655,6 +1655,15 @@ let map = null;
 let marcadorRecogida = null;
 let marcadorDestino = null;
 let marcadorConductor = null;
+/* Flecha del conductor como marcador del mapa: se
+   ubica sobre la ruta, así que a cualquier zoom o
+   desplazamiento queda pegada a la línea azul (a
+   diferencia del overlay fijo, que se desfasaba
+   al hacer zoom/pinch fuera del centro). */
+let marcadorFlecha = null;
+/* Zoom inicial de la navegación; después se respeta
+   el zoom que elija el usuario al alejar/acercar. */
+let zoomNavegacionInicial = true;
 let rutaLayer = null;
 
 
@@ -2646,8 +2655,13 @@ function centrarConductorEnPunto(
         [lat, lng],
         zoom || map.getZoom(),
         {
-            animate: true,
-            duration: 0.6
+            /* Sin animación: si el mapa se desplaza
+               poco a poco, la flecha (fija en el
+               centro) quedaría fuera de la línea
+               azul durante el paneo. Al centrar de
+               golpe, la flecha se mantiene pegada
+               a la ruta. */
+            animate: false
         }
     );
 
@@ -2759,6 +2773,53 @@ function crearIconoConductorInvisible() {
         html: "",
         iconSize: [1, 1],
         iconAnchor: [0, 0]
+    });
+
+}
+
+function crearIconoFlechaConductor(rumboGrados) {
+
+    /*
+     * Ícono de la flecha del conductor (marcador
+     * del mapa). Apunta hacia arriba por defecto;
+     * la rotamos por el rumbo (grados horario
+     * desde el norte) para que apunte hacia donde
+     * avanza la ruta. Como es un marcador ubicado
+     * sobre la propia ruta, se queda pegado a la
+     * línea azul a cualquier zoom.
+     */
+
+    const r =
+        Number(rumboGrados) || 0;
+
+    return L.divIcon({
+
+        className:
+            "marcador-flecha-conductor",
+
+        html:
+            "<svg width='46' height='46' " +
+            "viewBox='0 0 46 46' " +
+            "style='transform:rotate(" + r + "deg);" +
+            "transform-origin:50% 50%;' " +
+            "xmlns='http://www.w3.org/2000/svg'>" +
+
+            "<circle cx='23' cy='23' r='20' " +
+            "fill='rgba(255,214,0,0.28)' />" +
+
+            "<polygon " +
+            "points='23,6 36,34 23,27 10,34' " +
+            "fill='#FFD400' " +
+            "stroke='white' " +
+            "stroke-width='3' " +
+            "stroke-linejoin='round' />" +
+
+            "</svg>",
+
+        iconSize: [46, 46],
+
+        iconAnchor: [23, 23]
+
     });
 
 }
@@ -6330,12 +6391,10 @@ function iniciarNavegacion(
         )
         .classList.remove("hidden");
 
-    /* Flecha del conductor (overlay fijo centrado) */
-    document
-        .getElementById(
-            "flechaConductor"
-        )
-        .classList.remove("hidden");
+    /* La flecha ahora es un marcador del mapa (se
+       crea en actualizarNavegacion). El overlay
+       #flechaConductor ya no se usa. */
+    zoomNavegacionInicial = true;
 
     document
         .getElementById(
@@ -6415,20 +6474,16 @@ function detenerNavegacion() {
         )
         .classList.add("hidden");
 
-    /* Ocultar la flecha del conductor */
-    const flechaOcultar =
-        document.getElementById(
-            "flechaConductor"
-        );
+    /* Quitar la flecha del conductor (marcador del
+       mapa) al detener la navegación. */
+    if (marcadorFlecha) {
 
-    if (flechaOcultar) {
-
-        flechaOcultar.classList.add("hidden");
-
-        flechaOcultar.style.transform =
-            "translate(-50%, -50%) rotate(0deg)";
+        map.removeLayer(marcadorFlecha);
+        marcadorFlecha = null;
 
     }
+
+    zoomNavegacionInicial = true;
 
     if (
         map &&
@@ -6869,6 +6924,71 @@ function traducirInstruccion(maneuver) {
 
 }
 
+/*
+ * Devuelve el ícono (emoji de dirección) para un
+ * paso de la ruta. Si el paso trae "maneuver"
+ * (lo manda OSRM) usamos la traducción; si no
+ * (lo manda ORS, que viene en español pero sin
+ * maneuver), deducimos el ícono desde el texto
+ * de la instrucción en español.
+ */
+function obtenerIconoNavegacion(paso) {
+
+    const man =
+        paso &&
+        paso.maneuver;
+
+    if (man && man.type) {
+
+        return traducirInstruccion(man).icono;
+
+    }
+
+    const texto =
+        (
+            paso &&
+            paso.instruction &&
+            paso.instruction.toLowerCase()
+        ) || "";
+
+    if (texto.includes("izquierda")) {
+        return "⬅️";
+    }
+
+    if (texto.includes("derecha")) {
+        return "➡️";
+    }
+
+    if (texto.includes("rotonda")) {
+        return "🔄";
+    }
+
+    if (
+        texto.includes("recto") ||
+        texto.includes("frente")
+    ) {
+        return "⬆️";
+    }
+
+    if (
+        texto.includes("llegar") ||
+        texto.includes("llegada")
+    ) {
+        return "🏁";
+    }
+
+    if (
+        texto.includes("camina hacia") ||
+        texto.includes("inicia") ||
+        texto.includes("sal")
+    ) {
+        return "🚗";
+    }
+
+    return "⬆️";
+
+}
+
 function textoInstruccionNavegacion(paso) {
 
     /*
@@ -7051,17 +7171,54 @@ async function actualizarNavegacion(
             );
 
         /*
-         * La flecha del conductor (overlay fijo
-         * centrado) gira para apuntar en la
-         * dirección de avance. El mapa se queda
-         * norte-arriba (más estable y sin los
-         * problemas de rotación del pane de
-         * leaflet-rotate).
+         * FLECHA DEL CONDUCTOR (MARCADOR SOBRE LA
+         * RUTA). La ubicamos en el primer punto real
+         * de la ruta (coordenadasRuta[0]), así que
+         * queda literalmente sobre la línea azul a
+         * cualquier zoom o desplazamiento. La
+         * rotamos según el rumbo de avance.
          */
 
-        if (rumboActual !== null) {
+        if (
+            coordenadasRuta &&
+            coordenadasRuta.length
+        ) {
 
-            apuntarFlechaConductor(rumboActual);
+            const latFlecha =
+                coordenadasRuta[0][1];
+            const lngFlecha =
+                coordenadasRuta[0][0];
+
+            if (!marcadorFlecha) {
+
+                marcadorFlecha =
+                    L.marker(
+                        [latFlecha, lngFlecha],
+                        {
+                            icon:
+                                crearIconoFlechaConductor(
+                                    rumboActual || 0
+                                ),
+                            interactive: false,
+                            keyboard: false
+                        }
+                    )
+                    .addTo(map);
+
+            } else {
+
+                marcadorFlecha.setLatLng([
+                    latFlecha,
+                    lngFlecha
+                ]);
+
+                marcadorFlecha.setIcon(
+                    crearIconoFlechaConductor(
+                        rumboActual || 0
+                    )
+                );
+
+            }
 
         }
 
@@ -7100,11 +7257,49 @@ async function actualizarNavegacion(
          * camino por delante.
          */
 
-        centrarConductorEnPunto(
-            origenLat,
-            origenLng,
-            18
-        );
+        /*
+         * Centramos el mapa en el PRIMER PUNTO REAL
+         * de la ruta (coordenadasRuta[0]), no en el
+         * GPS crudo del conductor. ORS/OSRM ajustan
+         * (snap) el inicio de la ruta a la calle más
+         * cercana, así que el GPS puede quedar a
+         * varios metros del punto donde arranca la
+         * línea azul. Al centrar sobre el inicio de
+         * la ruta, la flecha queda sobre la línea.
+         *
+         * El zoom: en la PRIMERA actualización usamos
+         * 18 (vista cercana); después respetamos el
+         * zoom que elija el usuario al alejar/acercar,
+         * para que pueda ver más de la ruta sin que el
+         * sistema lo fuerce de vuelta a 18.
+         */
+        const zoomCentrado =
+            zoomNavegacionInicial
+                ? 18
+                : map.getZoom();
+
+        zoomNavegacionInicial = false;
+
+        if (
+            coordenadasRuta &&
+            coordenadasRuta.length
+        ) {
+
+            centrarConductorEnPunto(
+                coordenadasRuta[0][1],
+                coordenadasRuta[0][0],
+                zoomCentrado
+            );
+
+        } else {
+
+            centrarConductorEnPunto(
+                origenLat,
+                origenLng,
+                zoomCentrado
+            );
+
+        }
 
         /*
          * PROXIMA INSTRUCCION
@@ -7124,25 +7319,20 @@ async function actualizarNavegacion(
 
         if (siguientePaso) {
 
-            const instruccion =
-                traducirInstruccion(
-                    siguientePaso.maneuver
-                );
-
             document
                 .getElementById(
                     "navIcono"
                 )
                 .innerText =
-                    instruccion.icono;
+                    obtenerIconoNavegacion(
+                        siguientePaso
+                    );
 
             /*
-             * Texto real de la instrucción: tanto
-             * ORS como OSRM lo devuelven en
-             * "instruction" (ORS a veces no
-             * incluye "maneuver"). Usamos la
-             * traducción al español cuando hay
-             * maneuver disponible.
+             * Texto real de la instrucción: ORS lo
+             * devuelve en español ("instruction") y
+             * OSRM lo trae sin "instruction" pero con
+             * "maneuver", que traducimos al español.
              */
 
             document
