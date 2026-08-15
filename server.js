@@ -6,6 +6,57 @@ const multer = require("multer");
 
 const database = require("./database");
 
+/* =====================================================
+   CARGAR .env (local, sin dependencias)
+   En produccion (Render) la variable ORS_API_KEY se
+   define en el dashboard; aqui solo la cargamos si no
+   esta ya en el entorno. La clave NUNCA se expone al
+   frontend.
+===================================================== */
+
+try {
+
+    const envPath =
+        path.join(__dirname, ".env");
+
+    if (fs.existsSync(envPath)) {
+
+        fs.readFileSync(envPath, "utf8")
+            .split("\n")
+            .forEach(linea => {
+
+                const t =
+                    linea.trim();
+
+                if (
+                    t &&
+                    !t.startsWith("#") &&
+                    t.includes("=")
+                ) {
+
+                    const i =
+                        t.indexOf("=");
+
+                    const k =
+                        t.slice(0, i).trim();
+
+                    const v =
+                        t.slice(i + 1).trim();
+
+                    if (process.env[k] === undefined) {
+                        process.env[k] = v;
+                    }
+
+                }
+
+            });
+
+    }
+
+} catch (e) {
+    /* .env es opcional */
+}
+
 const app = express();
 
 app.use(cors());
@@ -5448,6 +5499,134 @@ async function iniciarServidor() {
         await database.iniciarBaseDatos();
 
         prepararBaseDatos();
+
+
+/* =====================================================
+   RUTA (ROUTING) - PROXY SEGURO A ORS / OSRM
+   La clave de OpenRouteService vive SOLO aqui
+   (process.env.ORS_API_KEY). Devuelve
+   { routes: [ { geometry, legs } ] }.
+===================================================== */
+
+app.get(
+    "/api/ruta",
+    async (req, res) => {
+
+        const {
+            oLat,
+            oLng,
+            dLat,
+            dLng
+        } = req.query;
+
+        if (
+            oLat === undefined ||
+            oLng === undefined ||
+            dLat === undefined ||
+            dLng === undefined
+        ) {
+
+            return res.status(400).json({
+                error: "Faltan coordenadas"
+            });
+
+        }
+
+        const osLat = Number(oLat);
+        const osLng = Number(oLng);
+        const dsLat = Number(dLat);
+        const dsLng = Number(dLng);
+
+        /* 1) OpenRouteService (si hay clave) */
+
+        if (process.env.ORS_API_KEY) {
+
+            try {
+
+                const url =
+
+                    "https://api.openrouteservice.org/v2/directions/driving-car" +
+                    "?api_key=" + process.env.ORS_API_KEY +
+                    "&start=" + osLng + "," + osLat +
+                    "&end=" + dsLng + "," + dsLat;
+
+                const r =
+                    await fetch(url);
+
+                const d =
+                    await r.json();
+
+                const coords =
+
+                    d &&
+                    d.features &&
+                    d.features[0] &&
+                    d.features[0].geometry &&
+                    d.features[0].geometry.coordinates;
+
+                if (coords && coords.length) {
+
+                    return res.json({
+                        routes: [
+                            {
+                                geometry: {
+                                    type: "LineString",
+                                    coordinates: coords
+                                },
+                                legs: []
+                            }
+                        ]
+                    });
+
+                }
+
+            } catch (e) {
+
+                console.warn(
+                    "ORS falló, probando OSRM:",
+                    e
+                );
+
+            }
+
+        }
+
+        /* 2) OSRM (keyless) */
+
+        try {
+
+            const url =
+
+                "https://router.project-osrm.org/route/v1/driving/" +
+                osLng + "," + osLat + ";" +
+                dsLng + "," + dsLat +
+                "?overview=full&geometries=geojson&steps=true";
+
+            const r =
+                await fetch(url);
+
+            const d =
+                await r.json();
+
+            if (d && d.routes && d.routes.length) {
+
+                return res.json(d);
+
+            }
+
+        } catch (e) {
+
+            console.warn("OSRM falló:", e);
+
+        }
+
+        /* 3) Sin routing */
+        return res.status(502).json({
+            error: "No se pudo calcular la ruta"
+        });
+
+    }
+);
 
 
         app.listen(

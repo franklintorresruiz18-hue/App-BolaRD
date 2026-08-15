@@ -1644,10 +1644,7 @@ let rutaLayer = null;
 
 const ROUTING = {
 
-    proveedor: "osrm",
-    orsApiKey: "",
-    osrmUrl:
-        "https://router.project-osrm.org/route/v1/driving/"
+    backendRuta: "/api/ruta"
 
 };
 
@@ -1659,81 +1656,28 @@ async function obtenerRuta(
     dsLng
 ) {
 
-    /* 1) OpenRouteService (si está configurado) */
-
-    if (
-        ROUTING.proveedor === "ors" &&
-        ROUTING.orsApiKey
-    ) {
-
-        try {
-
-            const url =
-
-                "https://api.openrouteservice.org/v2/directions/driving-car" +
-                "?api_key=" + ROUTING.orsApiKey +
-                "&start=" + osLng + "," + osLat +
-                "&end=" + dsLng + "," + dsLat;
-
-            const res =
-                await fetch(url);
-
-            const dat =
-                await res.json();
-
-            const coords =
-
-                dat &&
-                dat.features &&
-                dat.features[0] &&
-                dat.features[0].geometry &&
-                dat.features[0].geometry.coordinates;
-
-            if (
-                coords &&
-                coords.length
-            ) {
-
-                return {
-
-                    routes: [
-                        {
-                            geometry: {
-                                type: "LineString",
-                                coordinates: coords
-                            },
-                            legs: []
-                        }
-                    ]
-
-                };
-
-            }
-
-        } catch (e) {
-
-            console.warn(
-                "ORS falló, probando OSRM:",
-                e
-            );
-
-        }
-
-    }
-
-    /* 2) OSRM (keyless) */
+    /* El routing ahora lo hace el backend (server.js)
+       usando la clave de ORS de forma segura en el
+       servidor. El frontend solo pide la ruta. */
 
     try {
 
         const url =
 
-            ROUTING.osrmUrl +
-            osLng + "," + osLat + ";" +
-            dsLng + "," + dsLat +
-            "?overview=full&geometries=geojson&steps=true";
+            ROUTING.backendRuta +
+            "?oLat=" + osLat +
+            "&oLng=" + osLng +
+            "&dLat=" + dsLat +
+            "&dLng=" + dsLng;
 
         const res =
             await fetch(url);
+
+        if (!res.ok) {
+
+            return null;
+
+        }
 
         const dat =
             await res.json();
@@ -1751,13 +1695,12 @@ async function obtenerRuta(
     } catch (e) {
 
         console.warn(
-            "OSRM falló:",
+            "Routing backend falló:",
             e
         );
 
     }
 
-    /* 3) Sin routing disponible */
     return null;
 
 }
