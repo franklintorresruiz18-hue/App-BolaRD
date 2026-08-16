@@ -5,6 +5,7 @@ const fs = require("fs");
 const multer = require("multer");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 
 const database = require("./database");
 
@@ -216,6 +217,47 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+
+/* =====================================================
+   RATE LIMIT (anti fuerza-bruta)
+   trust proxy: Render usa un proxy, así req.ip es la
+   IP real del cliente y no la del proxy (clave para
+   que el límite sea por usuario, no por el proxy).
+===================================================== */
+
+app.set("trust proxy", 1);
+
+
+/* Login: máx 5 intentos FALLIDOS por IP cada 15 min.
+   skipSuccessfulRequests evita penalizar a quien
+   escribe mal su clave un par de veces. */
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Demasiados intentos fallidos. " +
+            "Inténtalo de nuevo en 15 minutos."
+    }
+});
+
+
+/* Registro: máx 10 por IP cada hora (anti spam/cuentas) */
+const registroLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Has enviado demasiados registros. " +
+            "Inténtalo más tarde."
+    }
+});
 
 app.use(
     express.static(
@@ -1179,6 +1221,7 @@ REGISTRO (alias de /usuarios que usa el frontend)
 
 app.post(
     "/registro",
+    registroLimiter,
     subirFotos.fields([
         { name: "foto_documento", maxCount: 1 },
         { name: "foto_matricula", maxCount: 1 },
@@ -1374,6 +1417,7 @@ LOGIN
 
 app.post(
     "/login",
+    loginLimiter,
     (req, res) => {
 
         const db =
