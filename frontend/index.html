@@ -1852,6 +1852,74 @@ let intervaloGPSConductor = null;
 
 let usuarioActual = null;
 
+
+/* =====================================================
+   TOKEN JWT EN TODAS LAS PETICIONES
+   Intercepta window.fetch para adjuntar el header
+   "Authorization: Bearer <token>" automáticamente
+   cuando hay sesión guardada. Si el server responde
+   401 (sesión inválida/expirada) en una ruta protegida,
+   limpia la sesión y recarga.
+===================================================== */
+
+(function () {
+
+    const TOKEN_KEY =
+        "mibola_token";
+
+    const fetchOriginal =
+        window.fetch.bind(window);
+
+    window.fetch = function (url, opciones) {
+
+        opciones = opciones || {};
+
+        const token =
+            localStorage.getItem(TOKEN_KEY);
+
+        if (token) {
+
+            opciones.headers =
+                opciones.headers || {};
+
+            if (
+                !(opciones.headers instanceof Headers)
+            ) {
+
+                opciones.headers =
+                    new Headers(opciones.headers);
+
+            }
+
+            opciones.headers.set(
+                "Authorization",
+                "Bearer " + token
+            );
+
+        }
+
+        return fetchOriginal(url, opciones)
+            .then(respuesta => {
+
+                if (
+                    respuesta.status === 401 &&
+                    String(url).indexOf("/login") === -1
+                ) {
+
+                    localStorage.removeItem(TOKEN_KEY);
+                    localStorage.removeItem("mibola_usuario");
+                    location.reload();
+
+                }
+
+                return respuesta;
+
+            });
+
+    };
+
+})();
+
 let timerRecogida = null;
 let timerDestino = null;
 
@@ -2419,6 +2487,15 @@ async function iniciarSesion() {
             );
         }
 
+        if (datos.token) {
+
+            localStorage.setItem(
+                "mibola_token",
+                datos.token
+            );
+
+        }
+
         usuarioActual =
             datos.usuario;
 
@@ -2525,6 +2602,10 @@ function cerrarSesion() {
 
     localStorage.removeItem(
         "mibola_usuario"
+    );
+
+    localStorage.removeItem(
+        "mibola_token"
     );
 
     location.reload();
@@ -3168,13 +3249,18 @@ async function buscarLugar(
 
     try {
 
+        /*
+         * Usamos el proxy del server (/api/lugares)
+         * en vez de Nominatim directo: combina
+         * Photon + Nominatim (RD) y, si hay
+         * GOOGLE_API_KEY en .env, usa Google.
+         * Así hay mucha más cobertura de
+         * direcciones en República Dominicana.
+         */
+
         const url =
-            "https://nominatim.openstreetmap.org/search" +
-            "?format=json" +
-            "&q=" +
-            encodeURIComponent(texto) +
-            "&limit=5" +
-            "&countrycodes=do";
+            "/api/lugares?q=" +
+            encodeURIComponent(texto);
 
         const respuesta =
             await fetch(url);
@@ -3192,7 +3278,13 @@ async function buscarLugar(
         contenedor.innerHTML = "";
 
         lugares.forEach(
-            lugar => {
+            l => {
+
+                const lugar = {
+                    lat: l.lat,
+                    lon: l.lng,
+                    display_name: l.nombre
+                };
 
                 const div =
                     document.createElement(
@@ -3204,7 +3296,7 @@ async function buscarLugar(
 
                 div.innerText =
                     "📍 " +
-                    lugar.display_name;
+                    l.nombre;
 
                 div.onclick =
                     () =>

@@ -3,6 +3,8 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const database = require("./database");
 
@@ -57,9 +59,162 @@ try {
     /* .env es opcional */
 }
 
+
+/* =====================================================
+   AUTENTICACIÓN JWT
+   El login firma un token con { id, tipo }. Las rutas
+   protegidas lo exigen vía header:
+   Authorization: Bearer <token>
+===================================================== */
+
+const JWT_SECRET =
+    process.env.JWT_SECRET ||
+    "cambiar_en_produccion_bolard_clave_secreta";
+
+if (!process.env.JWT_SECRET) {
+
+    console.warn(
+        "⚠️ JWT_SECRET no definido: usando clave por defecto " +
+        "(SOLO DESARROLLO). Define JWT_SECRET en .env / " +
+        "variables de entorno en producción."
+    );
+
+}
+
+
+/* Verifica el token y deja req.usuario = { id, tipo } */
+function verificarToken(req, res, next) {
+
+    const header =
+        req.headers["authorization"] || "";
+
+    const partes =
+        header.split(" ");
+
+    if (
+        partes.length === 2 &&
+        partes[0] === "Bearer"
+    ) {
+
+        try {
+
+            req.usuario =
+                jwt.verify(
+                    partes[1],
+                    JWT_SECRET
+                );
+
+            return next();
+
+        } catch (error) {
+
+            return res.status(401).json({
+                error: "Sesión inválida o expirada"
+            });
+
+        }
+
+    }
+
+    return res.status(401).json({
+        error: "Falta el token de autenticación"
+    });
+
+}
+
+
+/* El :id (o param) de la URL debe coincidir con el del token */
+function esElMismoUsuario(param) {
+
+    return (req, res, next) => {
+
+        const idToken =
+            req.usuario && req.usuario.id;
+
+        const idParam =
+            Number(req.params[param]);
+
+        if (idToken !== idParam) {
+
+            return res.status(403).json({
+                error: "No autorizado para este usuario"
+            });
+
+        }
+
+        next();
+
+    };
+
+}
+
+
+/* El token debe tener el tipo de usuario indicado */
+function soloRol(tipo) {
+
+    return (req, res, next) => {
+
+        if (
+            !req.usuario ||
+            req.usuario.tipo !== tipo
+        ) {
+
+            return res.status(403).json({
+                error: `Solo ${tipo}s pueden realizar esta acción`
+            });
+
+        }
+
+        next();
+
+    };
+
+}
+
+
 const app = express();
 
-app.use(cors());
+
+/* =====================================================
+   CORS - LISTA BLANCA DE ORÍGENES
+   Cerramos el acceso abierto: solo los orígenes
+   explícitos en CORS_ORIGINS (env, separados por coma)
+   pueden llamar a la API desde un navegador.
+   Se permiten siempre las peticiones sin cabecera
+   Origin (el propio SPA servido aquí, el WebView del
+   APK, curl/Postman) y los orígenes de la lista.
+===================================================== */
+
+const corsOptions = {
+    origin: (origen, callback) => {
+
+        const lista =
+            (process.env.CORS_ORIGINS ||
+             "http://localhost:3000,http://127.0.0.1:3000")
+                .split(",")
+                .map(o => o.trim())
+                .filter(Boolean);
+
+        // Sin Origin: SPA mismo origen, WebView móvil,
+        // curl, Postman.
+        if (!origen) {
+            return callback(null, true);
+        }
+
+        if (lista.includes(origen)) {
+            return callback(null, true);
+        }
+
+        return callback(
+            new Error(
+                "Origen no permitido por CORS: " + origen
+            )
+        );
+
+    }
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use(
@@ -67,6 +222,42 @@ app.use(
         path.join(__dirname, "frontend")
     )
 );
+
+
+/* =====================================================
+   PROTEGER RUTAS CON JWT
+   Todas las rutas requieren token excepto las públicas
+   (login, registro y health-check). El registro alterno
+   POST /usuarios también es público.
+===================================================== */
+
+const RUTAS_PUBLICAS = new Set([
+    "/",
+    "/registro",
+    "/login",
+    "/api/estado"
+]);
+
+app.use((req, res, next) => {
+
+    if (req.method === "OPTIONS") {
+        return next();
+    }
+
+    if (
+        req.method === "POST" &&
+        req.path === "/usuarios"
+    ) {
+        return next();
+    }
+
+    if (RUTAS_PUBLICAS.has(req.path)) {
+        return next();
+    }
+
+    return verificarToken(req, res, next);
+
+});
 
 
 /* =====================================================
@@ -607,6 +798,85 @@ function prepararBaseDatos() {
 
 
 /* =====================================================
+MIGRAR CONTRASEÑAS EN TEXTO PLANO A HASH (bcrypt)
+Se ejecuta al arrancar: cualquier password que no
+empiece por "$2" (no es un hash bcrypt) se hashea.
+===================================================== */
+
+function migrarContrasenasPlanas() {
+
+    const db =
+        database.getDb();
+
+    try {
+
+        const resultado =
+            db.exec(
+                "SELECT id, password FROM usuarios"
+            );
+
+
+        if (
+            !resultado.length
+        ) {
+
+            return;
+
+        }
+
+
+        let migradas = 0;
+
+        resultado[0].values.forEach(
+            ([id, pwd]) => {
+
+                if (
+                    pwd &&
+                    !pwd.startsWith("$2")
+                ) {
+
+                    const hash =
+                        bcrypt.hashSync(
+                            pwd,
+                            10
+                        );
+
+                    db.run(
+                        "UPDATE usuarios SET password = ? WHERE id = ?",
+                        [hash, id]
+                    );
+
+                    migradas++;
+
+                }
+
+            }
+        );
+
+
+        if (migradas > 0) {
+
+            database.guardarBaseDatos();
+
+            console.log(
+                `🔐 ${migradas} contraseña(s) migrada(s) a hash bcrypt`
+            );
+
+        }
+
+    } catch (error) {
+
+        console.error(
+            "ERROR MIGRANDO CONTRASEÑAS:",
+            error
+        );
+
+    }
+
+}
+
+
+/* =====================================================
 GENERAR CÓDIGO DE VERIFICACIÓN
 ===================================================== */
 
@@ -837,6 +1107,12 @@ app.post(
 
         try {
 
+            const passwordHasheada =
+                bcrypt.hashSync(
+                    password,
+                    10
+                );
+
             const stmt =
                 db.prepare(`
                     INSERT INTO usuarios
@@ -856,7 +1132,7 @@ app.post(
                 nombre,
                 telefono,
                 email || null,
-                password,
+                passwordHasheada,
                 tipo
 
             ]);
@@ -1005,6 +1281,12 @@ app.post(
 
         try {
 
+            const passwordHasheada =
+                bcrypt.hashSync(
+                    password,
+                    10
+                );
+
             const stmt =
                 db.prepare(`
                     INSERT INTO usuarios
@@ -1037,7 +1319,7 @@ app.post(
                 nombre,
                 telefono,
                 email || null,
-                password,
+                passwordHasheada,
                 tipo,
 
                 documento_identidad || null,
@@ -1127,17 +1409,16 @@ app.post(
                         nombre,
                         telefono,
                         email,
-                        tipo
+                        tipo,
+                        password
                     FROM usuarios
                     WHERE telefono = ?
-                    AND password = ?
                     LIMIT 1
                 `);
 
 
             stmt.bind([
-                telefono,
-                password
+                telefono
             ]);
 
 
@@ -1162,12 +1443,46 @@ app.post(
             stmt.free();
 
 
+            if (
+                !usuario.password ||
+                !bcrypt.compareSync(
+                    password,
+                    usuario.password
+                )
+            ) {
+
+                return res.status(401).json({
+
+                    error:
+                        "Teléfono o contraseña incorrectos"
+
+                });
+
+            }
+
+
+            delete usuario.password;
+
+
+            const token =
+                jwt.sign(
+                    {
+                        id: usuario.id,
+                        tipo: usuario.tipo
+                    },
+                    JWT_SECRET,
+                    { expiresIn: "30d" }
+                );
+
+
             res.json({
 
                 mensaje:
                     "Inicio de sesión correcto",
 
-                usuario
+                usuario,
+
+                token
 
             });
 
@@ -1200,6 +1515,7 @@ OBTENER DATOS DE UN USUARIO (SALDO, FORMA DE PAGO, ETC)
 
 app.get(
     "/usuarios/:id",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -1298,6 +1614,7 @@ ACTUALIZAR FORMA DE PAGO (PASAJERO)
 
 app.put(
     "/usuarios/:id/pago",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -1406,6 +1723,7 @@ RETIRAR SALDO (CONDUCTOR)
 
 app.put(
     "/usuarios/:id/retirar",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -1625,6 +1943,7 @@ EDITAR PERFIL (NOMBRE Y FOTO DE PERFIL)
 app.put(
     "/usuarios/:id/perfil",
     subirFotos.single("foto_perfil"),
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -2074,7 +2393,7 @@ app.post(
             const db =
                 database.getDb();
 
-            const {
+            let {
                 usuario_id,
                 nombre_usuario,
                 tipo_usuario,
@@ -2083,6 +2402,10 @@ app.post(
                 asunto,
                 descripcion
             } = req.body;
+
+            // Seguridad: el ticket siempre pertenece al usuario
+            // del token, nunca al del body (evita suplantación).
+            usuario_id = req.usuario.id;
 
 
             if (
@@ -2180,6 +2503,7 @@ app.post(
 
 app.get(
     "/soporte/:usuario_id",
+    esElMismoUsuario("usuario_id"),
     (req, res) => {
 
         try {
@@ -2250,6 +2574,7 @@ CREAR VIAJE
 
 app.post(
     "/viajes",
+    soloRol("pasajero"),
     (req, res) => {
 
         const db =
@@ -2299,8 +2624,12 @@ app.post(
 
 
             /* =================================
-            PASAJERO
+            PASAJERO (SIEMPRE el usuario del token)
             ================================= */
+
+            // Seguridad: el pasajero es SIEMPRE quien inició
+            // sesión, nunca el del body (evita suplantación).
+            pasajero_id = req.usuario.id;
 
             if (!pasajero_id) {
 
@@ -2567,6 +2896,7 @@ VIAJES DISPONIBLES
 
 app.get(
     "/viajes/disponibles",
+    soloRol("conductor"),
     (req, res) => {
 
         try {
@@ -2891,6 +3221,7 @@ VIAJE ACTIVO PASAJERO
 
 app.get(
     "/viajes/pasajero/:id/activo",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -3000,6 +3331,7 @@ VIAJE ACTIVO CONDUCTOR
 
 app.get(
     "/viajes/conductor/:id/activo",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -3099,6 +3431,7 @@ VIAJES DEL CONDUCTOR
 
 app.get(
     "/viajes/conductor/:id",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -3186,6 +3519,7 @@ HISTORIAL DE VIAJES DEL CONDUCTOR (RECIENTES)
 
 app.get(
     "/viajes/conductor/:id/historial",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -3290,6 +3624,7 @@ HISTORIAL DE VIAJES DEL PASAJERO (RECIENTES)
 
 app.get(
     "/viajes/pasajero/:id/historial",
+    esElMismoUsuario("id"),
     (req, res) => {
 
         try {
@@ -3394,6 +3729,7 @@ ACEPTAR VIAJE
 
 app.put(
     "/viajes/:id/aceptar",
+    soloRol("conductor"),
     (req, res) => {
 
         try {
@@ -3717,6 +4053,7 @@ CONDUCTOR SALE HACIA LA RECOGIDA (aceptado -> en_camino)
 
 app.put(
     "/viajes/:id/en-camino",
+    soloRol("conductor"),
     (req, res) => {
 
         try {
@@ -3827,6 +4164,7 @@ VERIFICAR CÓDIGO Y RECOGER PASAJERO
 
 app.put(
     "/viajes/:id/verificar",
+    soloRol("conductor"),
     (req, res) => {
 
         try {
@@ -4059,6 +4397,7 @@ FINALIZAR VIAJE
 
 app.put(
     "/viajes/:id/finalizar",
+    soloRol("conductor"),
     (req, res) => {
 
         try {
@@ -4313,6 +4652,7 @@ FINALIZAR VIAJE ANTICIPADAMENTE (LO PIDE EL PASAJERO)
 
 app.put(
     "/viajes/:id/finalizar-pasajero",
+    soloRol("pasajero"),
     (req, res) => {
 
         try {
@@ -5500,6 +5840,8 @@ async function iniciarServidor() {
 
         prepararBaseDatos();
 
+        migrarContrasenasPlanas();
+
 
 /* =====================================================
    RUTA (ROUTING) - PROXY SEGURO A ORS / OSRM
@@ -5791,6 +6133,497 @@ app.get(
         return res.status(502).json({
             error: "No se pudo calcular la ruta"
         });
+
+    }
+);
+
+
+/* =====================================================
+   LUGARES (GEOCODIFICACIÓN) - PROXY SEGURO
+   Combina fuentes libres (Photon + Nominatim
+   acotado a RD) para mejorar la cobertura de
+   direcciones en República Dominicana. Si existe
+   GOOGLE_API_KEY en .env, usa Google Geocoding
+   (mejor cobertura) en su lugar. La key de Google
+   NUNCA sale del server.
+===================================================== */
+
+const RD_BBOX = {
+    minLat: 17.4,
+    maxLat: 19.9,
+    minLng: -72.0,
+    maxLng: -68.3
+};
+
+function nombreLugarPhoton(p) {
+
+    const partes = [];
+
+    if (p.name) {
+
+        partes.push(p.name);
+
+    } else if (p.street) {
+
+        partes.push(p.street);
+
+    }
+
+    const ciudad =
+        p.city ||
+        p.town ||
+        p.village ||
+        p.municipality;
+
+    if (ciudad) {
+
+        partes.push(ciudad);
+
+    }
+
+    if (p.state) {
+
+        partes.push(p.state);
+
+    }
+
+    if (p.country) {
+
+        partes.push(p.country);
+
+    }
+
+    return partes.join(", ");
+
+}
+
+function dentroDeRD(lat, lng) {
+
+    return (
+        lat >= RD_BBOX.minLat &&
+        lat <= RD_BBOX.maxLat &&
+        lng >= RD_BBOX.minLng &&
+        lng <= RD_BBOX.maxLng
+    );
+
+}
+
+app.get(
+    "/api/lugares",
+    async (req, res) => {
+
+        const q = req.query.q;
+
+        if (
+            !q ||
+            String(q).trim().length < 2
+        ) {
+
+            return res.json([]);
+
+        }
+
+        const texto =
+            String(q).trim();
+
+        const resultados = [];
+        const vistos = new Set();
+
+        const clave =
+            (lat, lng) =>
+                lat.toFixed(4) +
+                "," +
+                lng.toFixed(4);
+
+        const agregar = (nombre, lat, lng) => {
+
+            if (
+                lat == null ||
+                lng == null ||
+                isNaN(lat) ||
+                isNaN(lng)
+            ) {
+
+                return;
+
+            }
+
+            const k = clave(lat, lng);
+
+            if (vistos.has(k)) {
+
+                return;
+
+            }
+
+            vistos.add(k);
+
+            resultados.push({
+                nombre: nombre,
+                lat: lat,
+                lng: lng
+            });
+
+        };
+
+        /*
+         * 1) GOOGLE (si hay key en .env). Mejor
+         *    cobertura en RD; la key nunca se
+         *    expone al navegador.
+         */
+        let googleResultados = [];
+
+        if (process.env.GOOGLE_API_KEY) {
+
+            const key =
+                process.env.GOOGLE_API_KEY;
+
+            const empujarGoogle = (
+                nombre,
+                lat,
+                lng
+            ) => {
+
+                if (
+                    lat != null &&
+                    lng != null &&
+                    !isNaN(lat) &&
+                    !isNaN(lng)
+                ) {
+
+                    googleResultados.push({
+                        nombre: nombre,
+                        lat: lat,
+                        lng: lng
+                    });
+
+                }
+
+            };
+
+            /* a) Places API (New): Text Search */
+            try {
+
+                const r =
+                    await fetch(
+                        "https://places.googleapis.com/v1/places:searchText" +
+                        "?key=" + key,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json",
+                                "X-Goog-FieldMask":
+                                    "places.displayName," +
+                                    "places.formattedAddress," +
+                                    "places.location"
+                            },
+                            body: JSON.stringify({
+                                text: texto,
+                                languageCode: "es",
+                                regionCode: "DO"
+                            })
+                        }
+                    );
+
+                const d =
+                    await r.json();
+
+                (d.places || [])
+                    .forEach(
+                        p => {
+
+                            const loc =
+                                p.location;
+
+                            const nombre =
+                                p.formattedAddress ||
+                                (
+                                    p.displayName &&
+                                    p.displayName.text
+                                ) ||
+                                texto;
+
+                            if (loc) {
+
+                                empujarGoogle(
+                                    nombre,
+                                    Number(
+                                        loc.latitude
+                                    ),
+                                    Number(
+                                        loc.longitude
+                                    )
+                                );
+
+                            }
+
+                        }
+                    );
+
+            } catch (e) {
+
+                console.warn(
+                    "Google Places (New) falló:",
+                    e
+                );
+
+            }
+
+            /* b) Places API (legacy): Text Search */
+            if (googleResultados.length === 0) {
+
+                try {
+
+                    const r =
+                        await fetch(
+                            "https://maps.googleapis.com/maps/api/place/textsearch/json" +
+                            "?query=" +
+                            encodeURIComponent(texto) +
+                            "&language=es" +
+                            "&region=do" +
+                            "&key=" + key
+                        );
+
+                    const d =
+                        await r.json();
+
+                    (d.results || [])
+                        .forEach(
+                            p => {
+
+                                const loc =
+                                    p.geometry &&
+                                    p.geometry.location;
+
+                                if (loc) {
+
+                                    empujarGoogle(
+                                        p.formatted_address ||
+                                            texto,
+                                        Number(loc.lat),
+                                        Number(loc.lng)
+                                    );
+
+                                }
+
+                            }
+                        );
+
+                } catch (e) {
+
+                    console.warn(
+                        "Google Places (legacy) falló:",
+                        e
+                    );
+
+                }
+
+            }
+
+            /* c) Geocoding API */
+            if (googleResultados.length === 0) {
+
+                try {
+
+                    const r =
+                        await fetch(
+                            "https://maps.googleapis.com/maps/api/geocode/json" +
+                            "?address=" +
+                            encodeURIComponent(texto) +
+                            "&components=country:DO" +
+                            "&language=es" +
+                            "&key=" + key
+                        );
+
+                    const d =
+                        await r.json();
+
+                    (d.results || [])
+                        .forEach(
+                            r0 => {
+
+                                const loc =
+                                    r0.geometry &&
+                                    r0.geometry.location;
+
+                                if (loc) {
+
+                                    empujarGoogle(
+                                        r0.formatted_address,
+                                        Number(loc.lat),
+                                        Number(loc.lng)
+                                    );
+
+                                }
+
+                            }
+                        );
+
+                } catch (e) {
+
+                    console.warn(
+                        "Google Geocoding falló:",
+                        e
+                    );
+
+                }
+
+            }
+
+        }
+
+        /* Volcar resultados de Google */
+        googleResultados.forEach(
+            r => agregar(
+                r.nombre,
+                r.lat,
+                r.lng
+            )
+        );
+
+        /*
+         * RESPALDO LIBRE (si Google no aportó nada:
+         * API no habilitada, sin billing o sin
+         * resultados). Photon + Nominatim acotado a
+         * RD.
+         */
+        if (googleResultados.length === 0) {
+
+            /* 2) PHOTON (libre, sin key). Filtramos
+               a RD para no traer resultados de
+               otros países. */
+            try {
+
+                const url =
+
+                    "https://photon.komoot.io/api/" +
+                    "?q=" +
+                    encodeURIComponent(texto) +
+                    "&limit=8" +
+                    "&lang=es";
+
+                const r =
+                    await fetch(
+                        url,
+                        {
+                            headers: {
+                                "User-Agent":
+                                    "MiBola/1.0"
+                            }
+                        }
+                    );
+
+                const d =
+                    await r.json();
+
+                (d.features || [])
+                    .forEach(
+                        f => {
+
+                            const p =
+                                f.properties ||
+                                {};
+
+                            const c =
+                                f.geometry &&
+                                f.geometry.coordinates;
+
+                            if (!c) {
+
+                                return;
+
+                            }
+
+                            const lat =
+                                Number(c[1]);
+                            const lng =
+                                Number(c[0]);
+
+                            if (
+                                dentroDeRD(
+                                    lat,
+                                    lng
+                                )
+                            ) {
+
+                                agregar(
+                                    nombreLugarPhoton(
+                                        p
+                                    ),
+                                    lat,
+                                    lng
+                                );
+
+                            }
+
+                        }
+                    );
+
+            } catch (e) {
+
+                console.warn(
+                    "Photon falló:",
+                    e
+                );
+
+            }
+
+            /* 3) NOMINATIM acotado a RD como
+               complemento (calles específicas que
+               Photon no trae). El server manda
+               User-Agent válido para cumplir la
+               política de uso de OSM. */
+            try {
+
+                const url =
+
+                    "https://nominatim.openstreetmap.org/search" +
+                    "?format=json" +
+                    "&q=" +
+                    encodeURIComponent(texto) +
+                    "&limit=8" +
+                    "&countrycodes=do";
+
+                const r =
+                    await fetch(
+                        url,
+                        {
+                            headers: {
+                                "User-Agent":
+                                    "MiBola/1.0 (app de transporte RD)"
+                            }
+                        }
+                    );
+
+                const d =
+                    await r.json();
+
+                (d || [])
+                    .forEach(
+                        n => {
+
+                            agregar(
+                                n.display_name,
+                                Number(n.lat),
+                                Number(n.lon)
+                            );
+
+                        }
+                    );
+
+            } catch (e) {
+
+                console.warn(
+                    "Nominatim falló:",
+                    e
+                );
+
+            }
+
+        }
+
+        res.json(resultados);
 
     }
 );
