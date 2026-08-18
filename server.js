@@ -196,13 +196,45 @@ const corsOptions = {
                 .map(o => o.trim())
                 .filter(Boolean);
 
-        // Sin Origin: SPA mismo origen, WebView móvil,
+        // Sin Origin: SPA mismo servidor, WebView móvil,
         // curl, Postman.
         if (!origen) {
             return callback(null, true);
         }
 
+        // Origen explícitamente permitido en CORS_ORIGINS.
         if (lista.includes(origen)) {
+            return callback(null, true);
+        }
+
+        /* =====================================
+           ORÍGENES DE DESARROLLO / PRUEBA
+           El SPA usa rutas relativas, así que el
+           origen SIEMPRE es la propia app. Pero los
+           navegadores modernos envían la cabecera
+           Origin TAMBIÉN en peticiones mismo-origen,
+           por lo que CORS se aplica igual. Para poder
+           probar en el móvil vía el tunnel HTTPS de
+           Cloudflare (cuya URL efímera cambia en cada
+           reinicio) permitimos sus subdominios, además
+           de localhost en cualquier puerto.
+           La protección de la API sigue en el JWT, no
+           en CORS.
+        ===================================== */
+
+        // Quick tunnels de Cloudflare (pruebas móviles).
+        if (
+            /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/
+                .test(origen)
+        ) {
+            return callback(null, true);
+        }
+
+        // localhost / 127.0.0.1 en cualquier puerto.
+        if (
+            /^https?:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/
+                .test(origen)
+        ) {
             return callback(null, true);
         }
 
@@ -217,6 +249,37 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+
+/* =====================================================
+   SIN CACHÉ EN EL CLIENTE
+   En pruebas móviles vía tunnel, el navegador (sobre
+   todo Chrome Android con "ahorro de datos") cachea
+   index.html de forma agresiva, de modo que los
+   cambios del frontend no se reflejan al recargar.
+   Forzamos no-store para que SIEMPRE se sirva la
+   versión fresca del HTML (no afecta a la API).
+===================================================== */
+
+app.use((req, res, next) => {
+
+    res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate, proxy-revalidate"
+    );
+    res.setHeader(
+        "Pragma",
+        "no-cache"
+    );
+    res.setHeader(
+        "Expires",
+        "0"
+    );
+
+    next();
+
+});
+
 
 
 /* =====================================================
@@ -3192,7 +3255,13 @@ app.get(
                             AS conductor_calificacion,
 
                         c.total_calificaciones
-                            AS conductor_total_calificaciones
+                            AS conductor_total_calificaciones,
+
+                        c.matricula_vehiculo
+                            AS conductor_matricula,
+
+                        c.modelo_vehiculo
+                            AS conductor_modelo
 
                     FROM viajes v
 
@@ -3301,7 +3370,13 @@ app.get(
                             AS conductor_calificacion,
 
                         c.total_calificaciones
-                            AS conductor_total_calificaciones
+                            AS conductor_total_calificaciones,
+
+                        c.matricula_vehiculo
+                            AS conductor_matricula,
+
+                        c.modelo_vehiculo
+                            AS conductor_modelo
 
                     FROM viajes v
 

@@ -6,3 +6,4 @@ credenciales.txt
 *.sqlite3
 dist/
 build/
+node_modules/

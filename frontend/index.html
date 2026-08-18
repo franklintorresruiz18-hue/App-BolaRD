@@ -195,17 +195,41 @@ body {
     left: 0;
     width: 100%;
     max-height: 65vh;
-    overflow-y: auto;
     background: white;
     border-radius: 25px 25px 0 0;
     padding: 16px;
     z-index: 1000;
     box-shadow: 0 -5px 20px rgba(0,0,0,.20);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Cuerpo scrolleable del panel: usuario, botones de
+   modo y los modos (pasajero/conductor) se desplazan
+   aquí. La barra de estado y el handle quedan fijos
+   arriba del panel. */
+.panel-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+#barraEstadoConductor {
+    flex: 0 0 auto;
 }
 
 .panel.conductor-activo {
     max-height: 43vh;
-    overflow-y: auto;
+}
+
+/* Tarjeta de Estado/Conectarme fijada arriba del
+   panel del conductor para que el botón "Conectarme"
+   sea SIEMPRE visible, aunque el resto del contenido
+   (saldo, solicitudes) haga scroll. */
+.estado-conductor-sticky {
+    flex: 0 0 auto;
+    margin-top: 0 !important;
 }
 
 .panel.panel-minimo {
@@ -1100,7 +1124,34 @@ body {
             tabindex="0"
             title="Minimizar / ampliar el panel"></div>
 
-        <div class="header-user">
+        <div
+            id="barraEstadoConductor"
+            class="driver-card estado-conductor-sticky hidden"
+            style="background:#e8f5e9;border:2px solid #2e7d32;">
+
+            <span>Estado:</span>
+
+            <span
+                id="textoEstadoConductor"
+                class="status-offline">
+                Desconectado
+            </span>
+
+            <button
+                id="btnEstadoConductor"
+                class="button"
+                style="background:#2e7d32;color:#fff;font-size:18px;font-weight:bold;"
+                onclick="cambiarEstadoConductor()">
+                🟢 Conectarme
+            </button>
+
+        </div>
+
+        <div class="panel-body">
+
+        <div
+            class="header-user"
+            onclick="if(event.target.tagName!=='BUTTON' && document.querySelector('.panel').classList.contains('panel-colapsado')) alternarPanelConductor()">
 
             <div>
                 <b id="nombreUsuario">Usuario</b>
@@ -1456,6 +1507,37 @@ body {
 
             </div>
 
+        <div
+            id="reciboPasajero"
+            class="hidden">
+
+            <div
+                class="cancelled-card"
+                style="border-left:4px solid #1976d2;">
+
+                🏁 Viaje finalizado
+
+                <div
+                    id="reciboDetalle"
+                    style="margin-top:8px; font-weight:normal;">
+                </div>
+
+            </div>
+
+            <button
+                class="button"
+                onclick="abrirModalCalificacion(viajeParaCalificar,'conductor')">
+                ⭐ Calificar conductor
+            </button>
+
+            <button
+                class="button button-secondary"
+                onclick="mostrarNuevoViajePasajero()">
+                🚕 Solicitar nuevo viaje
+            </button>
+
+        </div>
+
         </div>
 
         <!-- CONDUCTOR -->
@@ -1498,25 +1580,6 @@ body {
                     style="margin-top:8px; margin-bottom:0;">
                     Toca para ver el detalle y retirar
                 </div>
-
-            </div>
-
-            <div class="driver-card">
-
-                <span>Estado:</span>
-
-                <span
-                    id="textoEstadoConductor"
-                    class="status-offline">
-                    Desconectado
-                </span>
-
-                <button
-                    id="btnEstadoConductor"
-                    class="button"
-                    onclick="cambiarEstadoConductor()">
-                    🟢 Conectarme
-                </button>
 
             </div>
 
@@ -1563,6 +1626,8 @@ body {
                 </div>
 
             </div>
+
+        </div>
 
         </div>
 
@@ -1840,6 +1905,7 @@ let minutosActuales = 0;
 let precioActual = 0;
 
 let viajeActualId = null;
+let viajeParaCalificar = null;
 
 let conductorOnline = false;
 
@@ -2327,7 +2393,21 @@ function cargarUsuario() {
    MOSTRAR APP
 ===================================================== */
 
+function debugBanner(msg) {
+
+    // Banner de depuración desactivado:
+    // no se muestra nada en la parte superior.
+    return;
+
+}
+
 function mostrarAplicacion() {
+
+    debugBanner(
+        "mostrarAplicacion -> tipo=" +
+        (usuarioActual &&
+            usuarioActual.tipo)
+    );
 
     document
         .getElementById("pantallaLogin")
@@ -3987,21 +4067,9 @@ async function comprobarViajePasajero() {
 
             detenerSeguimientoPasajero();
 
-            const idViajeTerminado =
-                viaje.id;
-
             viajeActualId = null;
 
-            alert(
-                "🏁 El viaje terminó correctamente."
-            );
-
-            mostrarNuevoViajePasajero();
-
-            abrirModalCalificacion(
-                idViajeTerminado,
-                "conductor"
-            );
+            mostrarReciboPasajero(viaje);
 
             return;
 
@@ -4079,6 +4147,74 @@ function detenerSeguimientoPasajero() {
         intervaloPasajero = null;
 
     }
+
+}
+
+
+function mostrarReciboPasajero(viaje) {
+
+    [
+        "pasoBuscando",
+        "panelConductorAceptado",
+        "canceladoPasajero"
+    ].forEach(id => {
+
+        const e =
+            document.getElementById(id);
+
+        if (e) {
+            e.classList.add("hidden");
+        }
+
+    });
+
+    const detalle =
+        document.getElementById(
+            "reciboDetalle"
+        );
+
+    detalle.innerHTML =
+
+        "📏 Distancia: " +
+        (
+            viaje.distancia
+                ? Number(viaje.distancia).toFixed(1) +
+                  " km"
+                : "—"
+        ) +
+        "<br>" +
+
+        "⏱️ Tiempo: " +
+        (
+            viaje.minutos
+                ? Math.round(viaje.minutos) +
+                  " min"
+                : "—"
+        ) +
+        "<br>" +
+
+        "💰 Total: RD$" +
+        (
+            viaje.precio
+                ? Number(viaje.precio).toFixed(0)
+                : "0"
+        ) +
+        "<br>" +
+
+        (
+            viaje.fecha
+                ? "📅 " + viaje.fecha
+                : ""
+        );
+
+    viajeParaCalificar = viaje.id;
+
+    document
+        .getElementById(
+            "reciboPasajero"
+        )
+        .classList
+        .remove("hidden");
 
 }
 
@@ -4304,6 +4440,30 @@ function mostrarConductorPasajero(viaje) {
                 : "Vehículo"
         ) +
         "</div>" +
+
+        (
+            viaje.conductor_matricula
+                ? "<div class='driver-info'>🔖 Matrícula: " +
+                  escaparHTML(viaje.conductor_matricula) +
+                  "</div>"
+                : ""
+        ) +
+
+        (
+            viaje.conductor_modelo
+                ? "<div class='driver-info'>🚙 Modelo: " +
+                  escaparHTML(viaje.conductor_modelo) +
+                  "</div>"
+                : ""
+        ) +
+
+        (
+            viaje.minutos
+                ? "<div class='driver-info'>⏱️ Duración estimada: " +
+                  Math.round(viaje.minutos) +
+                  " min</div>"
+                : ""
+        ) +
 
         "<div class='driver-info'>" +
         "📞 " +
@@ -5187,6 +5347,12 @@ function mostrarPasajero() {
 
     document
         .getElementById(
+            "barraEstadoConductor"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
             "modoPasajero"
         )
         .classList.remove("hidden");
@@ -5222,6 +5388,12 @@ function mostrarPasajero() {
 
 function mostrarConductor() {
 
+    debugBanner(
+        "mostrarConductor INICIA tipo=" +
+        (usuarioActual &&
+            usuarioActual.tipo)
+    );
+
     if (
         !usuarioActual ||
         usuarioActual.tipo !== "conductor"
@@ -5234,6 +5406,21 @@ function mostrarConductor() {
         return;
 
     }
+
+    debugBanner(
+        "mostrarConductor: modoCondHidden=" +
+        document
+            .getElementById(
+                "modoConductor"
+            )
+            .classList.contains("hidden") +
+        " panelColapsado=" +
+        document
+            .querySelector(".panel")
+            .classList.contains(
+                "panel-colapsado"
+            )
+    );
 
     document
         .getElementById(
@@ -5248,6 +5435,12 @@ function mostrarConductor() {
         .classList.remove("hidden");
 
     document
+        .getElementById(
+            "barraEstadoConductor"
+        )
+        .classList.remove("hidden");
+
+    document
         .getElementById("map")
         .classList.add(
             "mapa-conductor"
@@ -5257,6 +5450,45 @@ function mostrarConductor() {
         .querySelector(".panel")
         .classList.add(
             "conductor-activo"
+        );
+
+    const __panel =
+        document.querySelector(".panel");
+    const __modo =
+        document.getElementById(
+            "modoConductor"
+        );
+    const __tipo =
+        document.getElementById(
+            "tipoUsuario"
+        );
+
+    debugBanner(
+        "modoConductor clientH=" +
+        __modo.clientHeight +
+        " panelH=" +
+        __panel.clientHeight +
+        " panelScroll=" +
+        __panel.scrollHeight +
+        " tipoUsuario=" +
+        (__tipo ? __tipo.innerText : "?") +
+        " btnConect=" +
+        (__modo.querySelector(
+            "#btnEstadoConductor"
+        )
+            ? "EXISTE"
+            : "FALTA")
+    );
+
+    /* Siempre expandir el panel al entrar a la vista de
+       conductor: si estaba colapsado (botón minimizar),
+       el contenido (botón Conectarme, solicitudes) queda
+       oculto y el usuario solo ve la cabecera. */
+    document
+        .querySelector(".panel")
+        .classList.remove(
+            "panel-colapsado",
+            "panel-minimo"
         );
 
     setTimeout(
