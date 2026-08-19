@@ -6,6 +6,7 @@ const multer = require("multer");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
 
 const database = require("./database");
 
@@ -116,7 +117,12 @@ function verificarToken(req, res, next) {
             req.usuario =
                 jwt.verify(
                     partes[1],
-                    JWT_SECRET
+                    JWT_SECRET,
+                    {
+                        algorithms: [
+                            "HS256"
+                        ]
+                    }
                 );
 
             return next();
@@ -262,7 +268,66 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+
+/* =====================================================
+   HEADERS DE SEGURIDAD
+   Helmet configura CSP, HSTS, X-Frame-Options,
+   X-Content-Type-Options, Referrer-Policy, etc.
+===================================================== */
+
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: [
+                    "'self'"
+                ],
+                scriptSrc: [
+                    "'self'",
+                    "https://unpkg.com"
+                ],
+                styleSrc: [
+                    "'self'",
+                    "'unsafe-inline'",
+                    "https://unpkg.com"
+                ],
+                imgSrc: [
+                    "'self'",
+                    "data:",
+                    "https:",
+                    "blob:"
+                ],
+                connectSrc: [
+                    "'self'"
+                ],
+                fontSrc: [
+                    "'self'",
+                    "https:",
+                    "data:"
+                ],
+                objectSrc: [
+                    "'none'"
+                ],
+                mediaSrc: [
+                    "'self'",
+                    "blob:",
+                    "https:"
+                ]
+            }
+        },
+        hsts: {
+            maxAge: 31536000,
+            includeSubDomains: true,
+            preload: true
+        }
+    })
+);
+
+app.use(
+    express.json(
+        { limit: "10mb" }
+    )
+);
 
 
 /* =====================================================
@@ -2296,6 +2361,7 @@ CALIFICAR VIAJE
 
 app.post(
     "/viajes/:id/calificar",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -2308,8 +2374,13 @@ app.post(
                     req.params.id
                 );
 
+            /* Seguridad: el calificador SIEMPRE es quien
+               inició sesión (token JWT), nunca el del
+               body. */
+            const calificador_id =
+                req.usuario.id;
+
             const {
-                calificador_id,
                 estrellas,
                 comentario
             } = req.body;
@@ -3191,6 +3262,7 @@ VER TODOS LOS VIAJES
 
 app.get(
     "/viajes",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -3287,6 +3359,7 @@ OBTENER VIAJE POR ID
 
 app.get(
     "/viajes/:id",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -3933,6 +4006,7 @@ ACEPTAR VIAJE
 
 app.put(
     "/viajes/:id/aceptar",
+    verificarToken,
     soloRol("conductor"),
     (req, res) => {
 
@@ -5090,6 +5164,7 @@ CANCELAR VIAJE
 
 app.put(
     "/viajes/:id/cancelar",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -5102,9 +5177,12 @@ app.put(
                     req.params.id
                 );
 
+            /* Seguridad: el usuario_id SIEMPRE viene del
+               token JWT, nunca del body (evita
+               suplantación). */
             const usuarioId =
                 Number(
-                    req.body.usuario_id
+                    req.usuario.id
                 );
 
             const motivo =
@@ -5113,19 +5191,7 @@ app.put(
 
             const tipoUsuario =
                 req.body.tipo_usuario ||
-                "";
-
-
-            if (!usuarioId) {
-
-                return res.status(400).json({
-
-                    error:
-                        "Falta usuario_id"
-
-                });
-
-            }
+                req.usuario.tipo;
 
 
             /* =====================================
@@ -5444,6 +5510,7 @@ CAMBIAR ESTADO DEL VIAJE
 
 app.put(
     "/viajes/:id/estado",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -5545,13 +5612,62 @@ app.put(
 
 
             /* =====================================
-            RECOGIDO
+            VERIFICAR AUTORIZACIÓN
+            Solo el conductor o pasajero del
+            viaje pueden cambiar su estado.
+            ===================================== */
+
+            const esPasajeroViaje =
+                Number(
+                    viaje.pasajero_id
+                ) === Number(
+                    req.usuario.id
+                );
+
+            const esConductorViaje =
+                Number(
+                    viaje.conductor_id
+                ) === Number(
+                    req.usuario.id
+                );
+
+
+            if (
+                !esPasajeroViaje &&
+                !esConductorViaje
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "No tienes permiso para modificar este viaje"
+
+                });
+
+            }
+
+
+            /* =====================================
+            RECOGIDO (solo conductor)
             ===================================== */
 
             if (
                 estado ===
                 "recogido"
             ) {
+
+                if (
+                    !esConductorViaje
+                ) {
+
+                    return res.status(403).json({
+
+                        error:
+                            "Solo el conductor puede marcar como recogido"
+
+                    });
+
+                }
 
                 if (
                     !viaje.codigo_verificacion
@@ -5602,13 +5718,26 @@ app.put(
 
 
             /* =====================================
-            FINALIZAR
+            FINALIZAR (solo conductor)
             ===================================== */
 
             if (
                 estado ===
                 "finalizado"
             ) {
+
+                if (
+                    !esConductorViaje
+                ) {
+
+                    return res.status(403).json({
+
+                        error:
+                            "Solo el conductor puede finalizar el viaje"
+
+                    });
+
+                }
 
                 if (
                     viaje.estado !==
@@ -5750,6 +5879,7 @@ CHAT - OBTENER MENSAJES
 
 app.get(
     "/viajes/:id/mensajes",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -5761,6 +5891,65 @@ app.get(
                 Number(
                     req.params.id
                 );
+
+
+            /* =====================================
+            VERIFICAR QUE EL USUARIO PARTICIPE EN EL VIAJE
+            ===================================== */
+
+            const viajeVerif =
+                db.prepare(`
+                    SELECT
+                        id,
+                        pasajero_id,
+                        conductor_id
+                    FROM viajes
+                    WHERE id = ?
+                    LIMIT 1
+                `);
+
+            viajeVerif.bind([viajeId]);
+
+            if (
+                !viajeVerif.step()
+            ) {
+
+                viajeVerif.free();
+
+                return res.status(404).json({
+
+                    error:
+                        "Viaje no encontrado"
+
+                });
+
+            }
+
+            const viajeData =
+                viajeVerif.getAsObject();
+
+            viajeVerif.free();
+
+            const usuarioParticipa =
+                Number(
+                    viajeData.pasajero_id
+                ) === Number(req.usuario.id) ||
+                Number(
+                    viajeData.conductor_id
+                ) === Number(req.usuario.id);
+
+            if (
+                !usuarioParticipa
+            ) {
+
+                return res.status(403).json({
+
+                    error:
+                        "No tienes acceso a este chat"
+
+                });
+
+            }
 
 
             const stmt =
@@ -5847,6 +6036,7 @@ CHAT - ENVIAR MENSAJE
 
 app.post(
     "/viajes/:id/mensajes",
+    verificarToken,
     (req, res) => {
 
         try {
@@ -5860,16 +6050,17 @@ app.post(
                 );
 
 
-            const {
-                usuario_id,
-                mensaje
-            } = req.body;
-
-
+            /* Seguridad: el usuario_id SIEMPRE viene
+               del token JWT, nunca del body. */
             const usuarioId =
                 Number(
-                    usuario_id
+                    req.usuario.id
                 );
+
+
+            const {
+                mensaje
+            } = req.body;
 
 
             if (
