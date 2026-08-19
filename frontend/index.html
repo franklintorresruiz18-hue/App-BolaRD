@@ -215,21 +215,8 @@ body {
     overflow-y: auto;
 }
 
-#barraEstadoConductor {
-    flex: 0 0 auto;
-}
-
 .panel.conductor-activo {
     max-height: 43vh;
-}
-
-/* Tarjeta de Estado/Conectarme fijada arriba del
-   panel del conductor para que el botón "Conectarme"
-   sea SIEMPRE visible, aunque el resto del contenido
-   (saldo, solicitudes) haga scroll. */
-.estado-conductor-sticky {
-    flex: 0 0 auto;
-    margin-top: 0 !important;
 }
 
 .panel.panel-minimo {
@@ -1123,29 +1110,6 @@ body {
             role="button"
             tabindex="0"
             title="Minimizar / ampliar el panel"></div>
-
-        <div
-            id="barraEstadoConductor"
-            class="driver-card estado-conductor-sticky hidden"
-            style="background:#e8f5e9;border:2px solid #2e7d32;">
-
-            <span>Estado:</span>
-
-            <span
-                id="textoEstadoConductor"
-                class="status-offline">
-                Desconectado
-            </span>
-
-            <button
-                id="btnEstadoConductor"
-                class="button"
-                style="background:#2e7d32;color:#fff;font-size:18px;font-weight:bold;"
-                onclick="cambiarEstadoConductor()">
-                🟢 Conectarme
-            </button>
-
-        </div>
 
         <div class="panel-body">
 
@@ -5345,11 +5309,24 @@ function mostrarPasajero() {
         )
         .classList.add("hidden");
 
-    document
-        .getElementById(
-            "barraEstadoConductor"
-        )
-        .classList.add("hidden");
+    /* Al salir del modo conductor el conductor queda
+       desconectado (deja de recibir solicitudes), como
+       Uber cuando dejas de estar en línea. */
+    conductorOnline = false;
+
+    if (intervaloConductor) {
+
+        clearInterval(intervaloConductor);
+        intervaloConductor = null;
+
+    }
+
+    if (intervaloGPSConductor) {
+
+        clearInterval(intervaloGPSConductor);
+        intervaloGPSConductor = null;
+
+    }
 
     document
         .getElementById(
@@ -5434,11 +5411,14 @@ function mostrarConductor() {
         )
         .classList.remove("hidden");
 
-    document
-        .getElementById(
-            "barraEstadoConductor"
-        )
-        .classList.remove("hidden");
+    /* El conductor queda en línea automáticamente al
+       entrar al modo conductor (como Uber): empieza a
+       recibir solicitudes de viaje sin botón Conectar. */
+    conductorOnline = true;
+
+    iniciarActualizacionConductor();
+
+    iniciarGPSConductor();
 
     document
         .getElementById("map")
@@ -5472,9 +5452,9 @@ function mostrarConductor() {
         __panel.scrollHeight +
         " tipoUsuario=" +
         (__tipo ? __tipo.innerText : "?") +
-        " btnConect=" +
+        " viajesDisp=" +
         (__modo.querySelector(
-            "#btnEstadoConductor"
+            "#viajesDisponibles"
         )
             ? "EXISTE"
             : "FALTA")
@@ -5509,78 +5489,6 @@ function mostrarConductor() {
     cargarViajesDisponibles();
 
     cargarSaldoConductor();
-
-}
-
-
-/* =====================================================
-   ESTADO CONDUCTOR
-===================================================== */
-
-function cambiarEstadoConductor() {
-
-    conductorOnline =
-        !conductorOnline;
-
-    const texto =
-        document.getElementById(
-            "textoEstadoConductor"
-        );
-
-    const boton =
-        document.getElementById(
-            "btnEstadoConductor"
-        );
-
-    if (conductorOnline) {
-
-        texto.innerText =
-            "Conectado";
-
-        texto.className =
-            "status-online";
-
-        boton.innerText =
-            "🔴 Desconectarme";
-
-        cargarViajesDisponibles();
-
-        iniciarActualizacionConductor();
-
-        iniciarGPSConductor();
-
-    } else {
-
-        texto.innerText =
-            "Desconectado";
-
-        texto.className =
-            "status-offline";
-
-        boton.innerText =
-            "🟢 Conectarme";
-
-        if (intervaloConductor) {
-
-            clearInterval(
-                intervaloConductor
-            );
-
-            intervaloConductor = null;
-
-        }
-
-        if (intervaloGPSConductor) {
-
-            clearInterval(
-                intervaloGPSConductor
-            );
-
-            intervaloGPSConductor = null;
-
-        }
-
-    }
 
 }
 
