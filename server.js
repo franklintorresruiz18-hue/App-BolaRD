@@ -68,16 +68,30 @@ try {
    Authorization: Bearer <token>
 ===================================================== */
 
-const JWT_SECRET =
-    process.env.JWT_SECRET ||
-    "cambiar_en_produccion_bolard_clave_secreta";
+let JWT_SECRET = process.env.JWT_SECRET;
 
-if (!process.env.JWT_SECRET) {
+if (!JWT_SECRET) {
+
+    /* En producción la clave es OBLIGATORIA: si falta, el
+       servidor NO debe arrancar con una clave pública
+       (cualquiera podría falsificar tokens). En desarrollo
+       local sí permitimos una clave por defecto. */
+    if (process.env.NODE_ENV === "production") {
+
+        throw new Error(
+            "JWT_SECRET no definido: es OBLIGATORIO en " +
+            "producción. Define la variable de entorno " +
+            "JWT_SECRET."
+        );
+
+    }
+
+    JWT_SECRET = "clave_desarrollo_local_bolard";
 
     console.warn(
         "⚠️ JWT_SECRET no definido: usando clave por defecto " +
-        "(SOLO DESARROLLO). Define JWT_SECRET en .env / " +
-        "variables de entorno en producción."
+        "(SOLO DESARROLLO LOCAL). Define JWT_SECRET en .env " +
+        "para producción."
     );
 
 }
@@ -322,6 +336,36 @@ const registroLimiter = rateLimit({
     }
 });
 
+
+/* Rutas de mapas: máx 30 por IP cada minuto.
+   Estos endpoints consumen la cuota de ORS/Google
+   (APIs de pago), así que se limita el abuso aunque
+   el usuario esté autenticado. */
+const rutaLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Demasiadas solicitudes de ruta. " +
+            "Inténtalo en un momento."
+    }
+});
+
+/* Búsqueda de lugares (geocoding Google): mismo motivo. */
+const lugaresLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Demasiadas búsquedas. " +
+            "Inténtalo en un momento."
+    }
+});
+
 app.use(
     express.static(
         path.join(__dirname, "frontend")
@@ -385,6 +429,17 @@ if (!fs.existsSync(carpetaUploads)) {
 
 }
 
+/* Solo se permiten imágenes. Sin esto, un usuario
+   podría subir .html/.svg y ejecutar XSS almacenado
+   desde /uploads (mismo origen que la app). Se mapea
+   el mimetype a una extensión segura para evitar que
+   el cliente invente la extensión del archivo. */
+const TIPOS_IMAGEN_PERMITIDOS = {
+    "image/jpeg": ".jpg",
+    "image/png":  ".png",
+    "image/webp": ".webp"
+};
+
 const almacenamiento =
     multer.diskStorage({
 
@@ -407,15 +462,18 @@ const almacenamiento =
             cb
         ) => {
 
+            const extension =
+                TIPOS_IMAGEN_PERMITIDOS[
+                    file.mimetype
+                ] || ".jpg";
+
             const nombreUnico =
                 Date.now() +
                 "-" +
                 Math.round(
                     Math.random() * 1e9
                 ) +
-                path.extname(
-                    file.originalname
-                );
+                extension;
 
             cb(
                 null,
@@ -431,6 +489,33 @@ const subirFotos =
         storage: almacenamiento,
         limits: {
             fileSize: 8 * 1024 * 1024
+        },
+        fileFilter: (
+            req,
+            file,
+            cb
+        ) => {
+
+            if (
+                TIPOS_IMAGEN_PERMITIDOS[
+                    file.mimetype
+                ]
+            ) {
+
+                return cb(
+                    null,
+                    true
+                );
+
+            }
+
+            cb(
+                new Error(
+                    "Tipo de archivo no permitido. " +
+                    "Solo imágenes JPG, PNG o WEBP."
+                )
+            );
+
         }
     });
 
@@ -6023,6 +6108,7 @@ function decodificarPolyline(str) {
 
 app.get(
     "/api/ruta",
+    rutaLimiter,
     async (req, res) => {
 
         const {
@@ -6329,6 +6415,7 @@ function dentroDeRD(lat, lng) {
 
 app.get(
     "/api/lugares",
+    lugaresLimiter,
     async (req, res) => {
 
         const q = req.query.q;
@@ -6793,6 +6880,34 @@ app.get(
     }
 
 }
+
+
+/* Manejador de errores global: solo expone al cliente
+   el mensaje de rechazo de archivos (fileFilter); los
+   errores internos devuelven 500 genérico sin filtrar
+   información. */
+app.use((err, req, res, next) => {
+
+    console.error("❌ Error no controlado:", err);
+
+    const esRechazoSubida =
+        err &&
+        err.message &&
+        /archivo no permitido/i.test(err.message);
+
+    if (esRechazoSubida) {
+
+        return res.status(400).json({
+            error: err.message
+        });
+
+    }
+
+    res.status(500).json({
+        error: "Error interno del servidor"
+    });
+
+});
 
 
 iniciarServidor();
