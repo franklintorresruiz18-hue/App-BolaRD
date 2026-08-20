@@ -9,6 +9,7 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 
 const database = require("./database");
+const otp = require("./otp");
 
 /* =====================================================
    CARGAR .env (local, sin dependencias)
@@ -435,6 +436,34 @@ const lugaresLimiter = rateLimit({
     }
 });
 
+/* OTP: envío de código. Muy restringido para evitar
+   abuso (spam de SMS/correo y enumeración). */
+const otpEnvioLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Demasiados códigos enviados. " +
+            "Inténtalo en 15 minutos."
+    }
+});
+
+/* OTP: verificación de código. Limita los intentos
+   de fuerza bruta sobre el código de 6 dígitos. */
+const otpVerificacionLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error:
+            "Demasiados intentos. " +
+            "Solicita un nuevo código."
+    }
+});
+
 /* =====================================================
    PROTEGER RUTAS CON JWT
    Todas las rutas requieren token excepto las públicas
@@ -446,7 +475,9 @@ const RUTAS_PUBLICAS = new Set([
     "/",
     "/registro",
     "/login",
-    "/api/estado"
+    "/api/estado",
+    "/auth/enviar-codigo",
+    "/auth/verificar-codigo"
 ]);
 
 app.use((req, res, next) => {
@@ -1465,26 +1496,115 @@ app.post(
         { name: "foto_matricula", maxCount: 1 },
         { name: "foto_vehiculo", maxCount: 1 }
     ]),
-    (req, res) => {
+    async (req, res) => {
 
         const db =
             database.getDb();
 
         const {
-            nombre,
-            telefono,
             email,
+            codigo,
+            nombre,
             password,
             tipo,
+            telefono,
             documento_identidad,
             matricula_vehiculo,
             modelo_vehiculo
         } = req.body;
 
 
+        /* =================================
+           NORMALIZAR Y VALIDAR EMAIL (para OTP)
+        ================================= */
+
+        const emailNormalizado =
+            otp.normalizarEmail(email);
+
+        if (!emailNormalizado) {
+
+            return res.status(400).json({
+
+                error:
+                    "Correo electrónico inválido"
+
+            });
+
+        }
+
+
+        /* =================================
+           VALIDAR TELÉFONO (obligatorio en registro)
+        ================================= */
+
+        if (!telefono || !telefono.trim()) {
+
+            return res.status(400).json({
+
+                error:
+                    "El número de teléfono es obligatorio"
+
+            });
+
+        }
+
+        const telefonoNormalizado =
+            otp.normalizarTelefonoRD(telefono);
+
+        if (!telefonoNormalizado) {
+
+            return res.status(400).json({
+
+                error:
+                    "Número de teléfono inválido. Use formato RD (809, 829, 849)"
+
+            });
+
+        }
+
+
+        /* =================================
+           VERIFICAR OTP (puerta de seguridad)
+           El código se verifica contra el EMAIL.
+        ================================= */
+
+        const resultadoOTP =
+            otp.verificar(
+                emailNormalizado,
+                codigo
+            );
+
+        if (!resultadoOTP.ok) {
+
+            const mensajes = {
+                no_encontrado:
+                    "Debes solicitar un código primero",
+                expirado:
+                    "El código expiró. Solicita uno nuevo.",
+                intentos_agotados:
+                    "Demasiados intentos. " +
+                    "Solicita un nuevo código.",
+                incorrecto:
+                    "Código incorrecto"
+            };
+
+            return res.status(401).json({
+
+                error:
+                    mensajes[resultadoOTP.razon] ||
+                    "Código inválido"
+
+            });
+
+        }
+
+
+        /* =================================
+           VALIDACIONES BÁSICAS
+        ================================= */
+
         if (
             !nombre ||
-            !telefono ||
             !password ||
             !tipo
         ) {
@@ -1498,6 +1618,17 @@ app.post(
 
         }
 
+        if (password.length < 6) {
+
+            return res.status(400).json({
+
+                error:
+                    "La contraseña debe tener al menos " +
+                    "6 caracteres"
+
+            });
+
+        }
 
         if (
             tipo !== "pasajero" &&
@@ -1515,7 +1646,7 @@ app.post(
 
 
         /* =================================
-        VALIDACIONES EXTRA PARA CONDUCTOR
+           VALIDACIONES EXTRA PARA CONDUCTOR
         ================================= */
 
         if (tipo === "conductor") {
@@ -1529,11 +1660,64 @@ app.post(
                 return res.status(400).json({
 
                     error:
-                        "Como conductor debes indicar tu documento de identidad, matrícula y modelo del vehículo"
+                        "Como conductor debes indicar tu " +
+                        "documento de identidad, matrícula " +
+                        "y modelo del vehículo"
 
                 });
 
             }
+
+        }
+
+
+        /* =================================
+           UNICIDAD DEL TELÉFONO Y EMAIL
+        ================================= */
+
+        const existeTelefono =
+            db.prepare(
+                "SELECT id FROM usuarios " +
+                "WHERE telefono = ? LIMIT 1"
+            );
+
+        existeTelefono.bind([telefonoNormalizado]);
+
+        const telefonoExiste = existeTelefono.step();
+
+        existeTelefono.free();
+
+        if (telefonoExiste) {
+
+            return res.status(400).json({
+
+                error:
+                    "Ese teléfono ya está registrado"
+
+            });
+
+        }
+
+        const existeEmail =
+            db.prepare(
+                "SELECT id FROM usuarios " +
+                "WHERE email = ? LIMIT 1"
+            );
+
+        existeEmail.bind([emailNormalizado]);
+
+        const emailExiste = existeEmail.step();
+
+        existeEmail.free();
+
+        if (emailExiste) {
+
+            return res.status(400).json({
+
+                error:
+                    "Ese correo ya está registrado"
+
+            });
 
         }
 
@@ -1578,6 +1762,9 @@ app.post(
                         password,
                         tipo,
 
+                        verificado_telefono,
+                        verificado_correo,
+
                         documento_identidad,
                         foto_documento,
 
@@ -1590,6 +1777,7 @@ app.post(
                     (
                         ?, ?, ?, ?, ?,
                         ?, ?,
+                        ?, ?,
                         ?, ?, ?, ?
                     )
                 `);
@@ -1598,10 +1786,13 @@ app.post(
             stmt.run([
 
                 nombre,
-                telefono,
-                email || null,
+                telefonoNormalizado,
+                emailNormalizado,
                 passwordHasheada,
                 tipo,
+
+                0,  // verificado_telefono: false (no se verifica por OTP)
+                1,  // verificado_correo: true (se verificó por OTP)
 
                 documento_identidad || null,
                 fotoDocumento,
@@ -1636,7 +1827,7 @@ app.post(
             res.status(400).json({
 
                 error:
-                    "El teléfono o email ya existe",
+                    "No se pudo registrar el usuario",
 
                 detalle:
                     error.message
@@ -1644,6 +1835,132 @@ app.post(
             });
 
         }
+
+    }
+);
+
+
+/* =====================================================
+   SOLICITAR CÓDIGO OTP (primer paso del registro)
+   Solo por email (Gmail)
+===================================================== */
+
+app.post(
+    "/auth/enviar-codigo",
+    otpEnvioLimiter,
+    async (req, res) => {
+
+        const {
+            email
+        } = req.body;
+
+
+        if (!email) {
+
+            return res.status(400).json({
+
+                error:
+                    "El correo electrónico es obligatorio"
+
+            });
+
+        }
+
+
+        try {
+
+            const {
+                destino: destinoOk,
+                medio
+            } = await otp.solicitar(email);
+
+            res.json({
+
+                mensaje:
+                    "Código enviado correctamente",
+
+                /* En desarrollo (consola) el frontend
+                   puede mostrar una pista; en producción
+                   nunca se devuelve el código. */
+                canal: "correo",
+                medio: medio
+
+            });
+
+        } catch (error) {
+
+            return res.status(400).json({
+
+                error: error.message
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+   VERIFICAR CÓDIGO OTP (segundo paso del registro)
+===================================================== */
+
+app.post(
+    "/auth/verificar-codigo",
+    otpVerificacionLimiter,
+    async (req, res) => {
+
+        const {
+            email,
+            codigo
+        } = req.body;
+
+        if (!email || !codigo) {
+
+            return res.status(400).json({
+
+                error:
+                    "Correo y código son obligatorios"
+
+            });
+
+        }
+
+        const destino = otp.normalizarEmail(email);
+
+        if (!destino) {
+
+            return res.status(400).json({
+
+                error: "Correo electrónico inválido"
+
+            });
+
+        }
+
+        const resultado = otp.verificar(destino, codigo);
+
+        if (!resultado.ok) {
+
+            return res.status(400).json({
+
+                error:
+                    resultado.razon === "expirado"
+                        ? "El código ha expirado"
+                        : resultado.razon === "intentos_agotados"
+                        ? "Demasiados intentos fallidos"
+                        : "Código incorrecto"
+
+            });
+
+        }
+
+        res.json({
+
+            mensaje: "Código verificado correctamente",
+            email: destino
+
+        });
 
     }
 );
@@ -1662,20 +1979,24 @@ app.post(
             database.getDb();
 
         const {
-            telefono,
+            identificador,
             password
         } = req.body;
 
+        const idLimpio =
+            (identificador || "").trim();
+
 
         if (
-            !telefono ||
+            !idLimpio ||
             !password
         ) {
 
             return res.status(400).json({
 
                 error:
-                    "Debes introducir teléfono y contraseña"
+                    "Debes introducir tu teléfono o correo " +
+                    "y tu contraseña"
 
             });
 
@@ -1684,45 +2005,76 @@ app.post(
 
         try {
 
-            const stmt =
-                db.prepare(`
-                    SELECT
-                        id,
-                        nombre,
-                        telefono,
-                        email,
-                        tipo,
-                        password
-                    FROM usuarios
-                    WHERE telefono = ?
-                    LIMIT 1
-                `);
+            const buscarPor =
+                (columna, valor) => {
 
+                    const s =
+                        db.prepare(`
+                            SELECT
+                                id,
+                                nombre,
+                                telefono,
+                                email,
+                                tipo,
+                                password
+                            FROM usuarios
+                            WHERE ` + columna + ` = ?
+                            LIMIT 1
+                        `);
 
-            stmt.bind([
-                telefono
-            ]);
+                    s.bind([valor]);
 
+                    let u = null;
 
-            if (!stmt.step()) {
+                    if (s.step()) {
+                        u = s.getAsObject();
+                    }
 
-                stmt.free();
+                    s.free();
+
+                    return u;
+
+                };
+
+            let usuario = null;
+
+            if (otp.esEmailValido(idLimpio)) {
+
+                usuario =
+                    buscarPor(
+                        "email",
+                        idLimpio.toLowerCase()
+                    );
+
+            }
+
+            if (!usuario) {
+
+                const tel =
+                    otp.normalizarTelefonoRD(idLimpio);
+
+                if (tel) {
+                    usuario = buscarPor("telefono", tel);
+                }
+
+                /* Soporte a cuentas antiguas cuyo
+                   teléfono no estaba normalizado. */
+                if (!usuario) {
+                    usuario = buscarPor("telefono", idLimpio);
+                }
+
+            }
+
+            if (!usuario) {
 
                 return res.status(401).json({
 
                     error:
-                        "Teléfono o contraseña incorrectos"
+                        "Teléfono/correo o contraseña incorrectos"
 
                 });
 
             }
-
-
-            const usuario =
-                stmt.getAsObject();
-
-
-            stmt.free();
 
 
             if (

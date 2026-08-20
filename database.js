@@ -63,6 +63,31 @@ async function iniciarBaseDatos() {
 
 
     /* =====================================
+       TABLA OTP (códigos de verificación)
+    ===================================== */
+
+    db.run(`
+
+        CREATE TABLE IF NOT EXISTS otps (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            destino TEXT NOT NULL,
+
+            canal TEXT NOT NULL,
+
+            codigo_hash TEXT NOT NULL,
+
+            intentos INTEGER DEFAULT 0,
+
+            expira INTEGER NOT NULL
+
+        );
+
+    `);
+
+
+    /* =====================================
        TABLA VIAJES
     ===================================== */
 
@@ -113,6 +138,7 @@ async function iniciarBaseDatos() {
        MIGRACIÓN
     ===================================== */
 
+    actualizarTablaUsuarios();
     actualizarTablaViajes();
 
 
@@ -124,6 +150,124 @@ async function iniciarBaseDatos() {
 
 
     console.log("✅ Base de datos lista");
+
+}
+
+
+/* ========================================
+   ACTUALIZAR TABLA USUARIOS
+   - Agrega flags de verificación.
+   - Relaja telefono NOT NULL para permitir
+     registro solo con correo.
+======================================== */
+
+function actualizarTablaUsuarios() {
+
+    const resultado =
+        db.exec("PRAGMA table_info(usuarios)");
+
+    if (resultado.length === 0) {
+
+        console.log(
+            "⚠️ No se encontró tabla usuarios"
+        );
+
+        return;
+
+    }
+
+    const columnas =
+        resultado[0].values.map(
+            fila => fila[1]
+        );
+
+    console.log(
+        "📋 Columnas usuarios:",
+        columnas
+    );
+
+    /* Flags de verificación. */
+    if (!columnas.includes("verificado_telefono")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN verificado_telefono INTEGER DEFAULT 0
+        `);
+
+        console.log("➕ verificado_telefono agregado");
+
+    }
+
+    if (!columnas.includes("verificado_correo")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN verificado_correo INTEGER DEFAULT 0
+        `);
+
+        console.log("➕ verificado_correo agregado");
+
+    }
+
+    /* Relajar NOT NULL en telefono si aplica.
+       SQLite no soporta ALTER COLUMN, así que
+       se reconstruye la tabla preservando datos. */
+    const colTelefono =
+        resultado[0].values.find(
+            f => f[1] === "telefono"
+        );
+
+    if (colTelefono && colTelefono[3] === 1) {
+
+        console.log(
+            "🔧 Relajando telefono NOT NULL..."
+        );
+
+        db.run(`
+            CREATE TABLE usuarios_new (
+
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                nombre TEXT NOT NULL,
+
+                telefono TEXT UNIQUE,
+
+                email TEXT UNIQUE,
+
+                password TEXT NOT NULL,
+
+                tipo TEXT NOT NULL,
+
+                verificado_telefono INTEGER DEFAULT 0,
+
+                verificado_correo INTEGER DEFAULT 0
+
+            )
+        `);
+
+        db.run(`
+            INSERT INTO usuarios_new
+            (
+                id, nombre, telefono,
+                email, password, tipo
+            )
+            SELECT
+                id, nombre, telefono,
+                email, password, tipo
+            FROM usuarios
+        `);
+
+        db.run("DROP TABLE usuarios");
+
+        db.run(
+            "ALTER TABLE usuarios_new RENAME TO usuarios"
+        );
+
+        console.log(
+            "✅ telefono ahora admite NULL (registro solo-correo)"
+        );
+
+    }
 
 }
 

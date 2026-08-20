@@ -920,8 +920,8 @@ body {
             <input
                 id="loginTelefono"
                 class="input"
-                type="tel"
-                placeholder="Teléfono">
+                type="text"
+                placeholder="Teléfono o correo">
 
             <input
                 id="loginPassword"
@@ -970,11 +970,44 @@ body {
                 type="text"
                 placeholder="Nombre completo">
 
+            <div class="step">
+                CORREO ELECTRÓNICO (para código de verificación)
+            </div>
+
+            <input
+                id="registroEmail"
+                class="input"
+                type="email"
+                placeholder="tu@correo.com"
+                autocomplete="email">
+
+            <button
+                id="btnEnviarCodigo"
+                class="button button-secondary"
+                type="button"
+                onclick="enviarCodigoRegistro()">
+                📨 Enviar código al correo
+            </button>
+
+            <input
+                id="registroCodigo"
+                class="input hidden"
+                type="text"
+                inputmode="numeric"
+                maxlength="6"
+                placeholder="Código de 6 dígitos">
+
+            <div class="step">
+                TELÉFONO (obligatorio)
+            </div>
+
             <input
                 id="registroTelefono"
                 class="input"
                 type="tel"
-                placeholder="Teléfono">
+                placeholder="Tu número (ej. 8091234567)"
+                inputmode="tel"
+                autocomplete="tel">
 
             <input
                 id="registroPassword"
@@ -2079,6 +2112,98 @@ function seleccionarTipoRegistro(tipo) {
    REGISTRO
 ===================================================== */
 
+async function enviarCodigoRegistro() {
+
+    const email =
+        document.getElementById(
+            "registroEmail"
+        ).value.trim();
+
+    const errorBox =
+        document.getElementById(
+            "errorRegistro"
+        );
+
+    const boton =
+        document.getElementById(
+            "btnEnviarCodigo"
+        );
+
+    errorBox.innerHTML = "";
+
+    if (!email) {
+
+        errorBox.innerHTML =
+            '<div class="error">' +
+            'Escribe tu correo electrónico para recibir el código.' +
+            '</div>';
+
+        return;
+    }
+
+    boton.disabled = true;
+    boton.innerText = "Enviando...";
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/auth/enviar-codigo",
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body:
+                        JSON.stringify({
+                            email: email
+                        })
+                }
+            );
+
+        const datos =
+            await respuesta.json();
+
+        if (!respuesta.ok) {
+
+            throw new Error(
+                datos.error ||
+                "No se pudo enviar el código."
+            );
+        }
+
+        document
+            .getElementById(
+                "registroCodigo"
+            )
+            .classList.remove("hidden");
+
+        errorBox.innerHTML =
+            '<div class="success">' +
+            '✅ Código enviado. ' +
+            (datos.medio === "consola"
+                ? "Revísalo en la terminal del servidor."
+                : "Revisa tu correo.") +
+            '</div>';
+
+    } catch (error) {
+
+        errorBox.innerHTML =
+            '<div class="error">' +
+            escaparHTML(error.message) +
+            '</div>';
+
+    } finally {
+
+        boton.disabled = false;
+        boton.innerText = "📨 Enviar código al correo";
+
+    }
+
+}
+
+
 async function registrarUsuario() {
 
     const nombre =
@@ -2086,9 +2211,19 @@ async function registrarUsuario() {
             "registroNombre"
         ).value.trim();
 
+    const email =
+        document.getElementById(
+            "registroEmail"
+        ).value.trim();
+
     const telefono =
         document.getElementById(
             "registroTelefono"
+        ).value.trim();
+
+    const codigo =
+        document.getElementById(
+            "registroCodigo"
         ).value.trim();
 
     const password =
@@ -2108,21 +2243,27 @@ async function registrarUsuario() {
 
     errorBox.innerHTML = "";
 
-    if (!nombre || !telefono || !password) {
+    if (
+        !nombre ||
+        !email ||
+        !telefono ||
+        !codigo ||
+        !password
+    ) {
 
         errorBox.innerHTML =
             '<div class="error">' +
-            'Completa todos los campos.' +
+            'Completa nombre, correo, teléfono, código y contraseña.' +
             '</div>';
 
         return;
     }
 
-    if (password.length < 4) {
+    if (password.length < 6) {
 
         errorBox.innerHTML =
             '<div class="error">' +
-            'La contraseña debe tener al menos 4 caracteres.' +
+            'La contraseña debe tener al menos 6 caracteres.' +
             '</div>';
 
         return;
@@ -2132,13 +2273,23 @@ async function registrarUsuario() {
         new FormData();
 
     datosFormulario.append(
-        "nombre",
-        nombre
+        "email",
+        email
     );
 
     datosFormulario.append(
         "telefono",
         telefono
+    );
+
+    datosFormulario.append(
+        "codigo",
+        codigo
+    );
+
+    datosFormulario.append(
+        "nombre",
+        nombre
     );
 
     datosFormulario.append(
@@ -2489,7 +2640,7 @@ async function iniciarSesion() {
 
         errorBox.innerHTML =
             '<div class="error">' +
-            'Introduce teléfono y contraseña.' +
+            'Introduce tu teléfono o correo y contraseña.' +
             '</div>';
 
         return;
@@ -2511,7 +2662,7 @@ async function iniciarSesion() {
                     },
                     body:
                         JSON.stringify({
-                            telefono,
+                            identificador: telefono,
                             password
                         })
                 }
