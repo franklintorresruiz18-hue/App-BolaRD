@@ -1,3 +1,4 @@
+<!-- CACHEBUSTER-20260819 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -10,7 +11,7 @@
 <title>MiBola</title>
 
 <link rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css?v=20260819">
 
 <style>
 
@@ -1697,8 +1698,8 @@ body {
 
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js"></script>
-<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet-src.js?v=20260819"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js?v=20260819"></script>
 
 <script>
 
@@ -1909,22 +1910,18 @@ let usuarioActual = null;
 
         if (token) {
 
+            /* Mezclamos los headers de forma segura:
+               un objeto plano funciona en todos los
+               navegadores, incluidos móviles. */
             opciones.headers =
-                opciones.headers || {};
-
-            if (
-                !(opciones.headers instanceof Headers)
-            ) {
-
-                opciones.headers =
-                    new Headers(opciones.headers);
-
-            }
-
-            opciones.headers.set(
-                "Authorization",
-                "Bearer " + token
-            );
+                Object.assign(
+                    {},
+                    opciones.headers || {},
+                    {
+                        "Authorization":
+                            "Bearer " + token
+                    }
+                );
 
         }
 

@@ -284,7 +284,11 @@ app.use(
                 ],
                 scriptSrc: [
                     "'self'",
+                    "'unsafe-inline'",
                     "https://unpkg.com"
+                ],
+                "script-src-attr": [
+                    "'unsafe-inline'"
                 ],
                 styleSrc: [
                     "'self'",
@@ -430,13 +434,6 @@ const lugaresLimiter = rateLimit({
             "Inténtalo en un momento."
     }
 });
-
-app.use(
-    express.static(
-        path.join(__dirname, "frontend")
-    )
-);
-
 
 /* =====================================================
    PROTEGER RUTAS CON JWT
@@ -1218,17 +1215,45 @@ const PORCENTAJE_FINALIZACION_ANTICIPADA = 0.7;
 INICIO
 ===================================================== */
 
-app.get("/", (req, res) => {
+/* =====================================================
+   ARCHIVOS ESTÁTICOS
+   Se sirve el frontend con cache-buster para forzar
+   a los navegadores a ignorar su cache local.
+===================================================== */
 
-    res.sendFile(
-        path.join(
-            __dirname,
-            "frontend",
-            "index.html"
-        )
+app.use((req, res, next) => {
+
+    res.setHeader(
+        "Cache-Control",
+        "no-store, no-cache, " +
+        "must-revalidate, proxy-revalidate, " +
+        "max-age=0"
     );
 
+    res.setHeader(
+        "Pragma",
+        "no-cache"
+    );
+
+    res.setHeader(
+        "Expires",
+        "0"
+    );
+
+    next();
+
 });
+
+app.use(
+    express.static(
+        path.join(__dirname, "frontend"),
+        {
+            maxAge: "0",
+            etag: false,
+            lastModified: false
+        }
+    )
+);
 
 
 /* =====================================================
