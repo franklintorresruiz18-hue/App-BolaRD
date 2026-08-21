@@ -7259,12 +7259,80 @@ app.get(
         /*
          * RESPALDO LIBRE (si Google no aportó nada:
          * API no habilitada, sin billing o sin
-         * resultados). Photon + Nominatim acotado a
-         * RD.
+         * resultados). LocationIQ (key gratuita) +
+         * Photon + Nominatim acotado a RD.
          */
         if (googleResultados.length === 0) {
 
-            /* 2) PHOTON (libre, sin key). Filtramos
+            /* 2) LOCATIONIQ (libre, requiere key
+               free-tier en .env como
+               LOCATIONIQ_API_KEY). Tiene buena
+               cobertura de RD (calles y POIs) y su
+               propio índice distinto a Nominatim,
+               así aporta resultados que Photon no
+               trae. Acotamos a RD con countrycodes.
+               Doc: https://locationiq.com */
+            if (process.env.LOCATIONIQ_API_KEY) {
+
+                try {
+
+                    const url =
+
+                        "https://locationiq.com/v1/search" +
+                        "?key=" +
+                        process.env.LOCATIONIQ_API_KEY +
+                        "&q=" +
+                        encodeURIComponent(texto) +
+                        "&format=json" +
+                        "&limit=20" +
+                        "&countrycodes=do" +
+                        "&addressdetails=1" +
+                        "&accept-language=es";
+
+                    const r =
+                        await fetch(url);
+
+                    const d =
+                        await r.json();
+
+                    /* LocationIQ devuelve un objeto de
+                       error si la key falla o se
+                       excede la cuota. */
+                    if (Array.isArray(d)) {
+
+                        d.forEach(
+                            n => {
+
+                                agregar(
+                                    n.display_name,
+                                    Number(n.lat),
+                                    Number(n.lon)
+                                );
+
+                            }
+                        );
+
+                    } else if (d && d.error) {
+
+                        console.warn(
+                            "LocationIQ:",
+                            d.error
+                        );
+
+                    }
+
+                } catch (e) {
+
+                    console.warn(
+                        "LocationIQ falló:",
+                        e
+                    );
+
+                }
+
+            }
+
+            /* 3) PHOTON (libre, sin key). Filtramos
                a RD para no traer resultados de
                otros países. */
             try {
@@ -7274,7 +7342,7 @@ app.get(
                     "https://photon.komoot.io/api/" +
                     "?q=" +
                     encodeURIComponent(texto) +
-                    "&limit=8" +
+                    "&limit=20" +
                     "&lang=es";
 
                 const r =
@@ -7343,7 +7411,7 @@ app.get(
 
             }
 
-            /* 3) NOMINATIM acotado a RD como
+            /* 4) NOMINATIM acotado a RD como
                complemento (calles específicas que
                Photon no trae). El server manda
                User-Agent válido para cumplir la
@@ -7356,7 +7424,8 @@ app.get(
                     "?format=json" +
                     "&q=" +
                     encodeURIComponent(texto) +
-                    "&limit=8" +
+                    "&limit=20" +
+                    "&addressdetails=1" +
                     "&countrycodes=do";
 
                 const r =
@@ -7397,10 +7466,157 @@ app.get(
 
         }
 
-        res.json(resultados);
+        /* Tope final para mantener la lista usable
+           en el frontend (evita 40+ resultados). */
+        const MAX_RESULTADOS = 25;
+
+        res.json(
+            resultados.slice(0, MAX_RESULTADOS)
+        );
 
     }
 );
+
+
+/* =====================================================
+   LUGARES - REVERSE GEOCODE (lat,lng -> dirección)
+   Usado por la función "soltar pin en el mapa":
+   dada una coordenada, devuelve un nombre legible
+   (calle/barrio) para mostrar en el campo. Google si
+   hay key; si no, Nominatim (RD). La key de Google
+   nunca sale del server.
+===================================================== */
+
+app.get(
+    "/api/lugares-reverse",
+    lugaresLimiter,
+    async (req, res) => {
+
+        const lat =
+            parseFloat(req.query.lat);
+
+        const lng =
+            parseFloat(req.query.lng);
+
+        if (
+            isNaN(lat) ||
+            isNaN(lng)
+        ) {
+
+            return res.json({
+                nombre: null,
+                lat: lat,
+                lng: lng
+            });
+
+        }
+
+        /* 1) GOOGLE reverse (si hay key en .env) */
+        if (process.env.GOOGLE_API_KEY) {
+
+            try {
+
+                const r =
+                    await fetch(
+                        "https://maps.googleapis.com/maps/api/geocode/json" +
+                        "?latlng=" +
+                        lat + "," + lng +
+                        "&language=es" +
+                        "&key=" +
+                        process.env.GOOGLE_API_KEY
+                    );
+
+                const d =
+                    await r.json();
+
+                if (
+                    d.results &&
+                    d.results.length > 0
+                ) {
+
+                    return res.json({
+                        nombre:
+                            d.results[0]
+                                .formatted_address,
+                        lat: lat,
+                        lng: lng
+                    });
+
+                }
+
+            } catch (e) {
+
+                console.warn(
+                    "Google reverse falló:",
+                    e
+                );
+
+            }
+
+        }
+
+        /* 2) NOMINATIM reverse (libre, RD). Zoom 18
+           da calle/barrio. User-Agent válido para
+           cumplir la política de OSM. */
+        try {
+
+            const url =
+
+                "https://nominatim.openstreetmap.org/reverse" +
+                "?format=json" +
+                "&lat=" + lat +
+                "&lon=" + lng +
+                "&zoom=18" +
+                "&addressdetails=1" +
+                "&accept-language=es";
+
+            const r =
+                await fetch(
+                    url,
+                    {
+                        headers: {
+                            "User-Agent":
+                                "MiBola/1.0 (app de transporte RD)"
+                        }
+                    }
+                );
+
+            const d =
+                await r.json();
+
+            if (d && d.display_name) {
+
+                return res.json({
+                    nombre: d.display_name,
+                    lat: lat,
+                    lng: lng
+                });
+
+            }
+
+        } catch (e) {
+
+            console.warn(
+                "Nominatim reverse falló:",
+                e
+            );
+
+        }
+
+        /* 3) Nada encontrado: devolvemos las
+           coordenadas como texto. */
+        res.json({
+            nombre:
+                lat.toFixed(5) +
+                ", " +
+                lng.toFixed(5),
+            lat: lat,
+            lng: lng
+        });
+
+    }
+);
+
 
 
         app.listen(
