@@ -673,6 +673,27 @@ body {
     flex-shrink: 0;
 }
 
+.nav-icono-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 40px;
+}
+
+.nav-distancia-giro {
+    font-size: 11px;
+    font-weight: bold;
+    color: #ffd400;
+    margin-top: 2px;
+    text-align: center;
+    line-height: 1.1;
+}
+
+.nav-distancia-giro:empty {
+    display: none;
+}
+
 .nav-texto {
     flex: 1;
 }
@@ -697,6 +718,30 @@ body {
     padding: 2px 8px;
     border-radius: 8px;
     margin-bottom: 6px;
+}
+
+/* Minimapa (overview de la ruta restante).
+   Fijo abajo-derecha, no interactivo, sin
+   controles. La ruta se dibuja encima en el
+   JS. Debe quedar por debajo del panel de
+   navegación (z 3000) pero encima del mapa. */
+.mini-mapa {
+    position: fixed;
+    right: 12px;
+    bottom: 96px;
+    width: 150px;
+    height: 150px;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0,0,0,.35);
+    border: 2px solid #fff;
+    z-index: 2500;
+    pointer-events: none;
+    background: #e8eaed;
+}
+
+.mini-mapa .leaflet-control-attribution {
+    display: none;
 }
 
 /* ===============================
@@ -870,6 +915,10 @@ body {
     </svg>
 </div>
 
+<!-- MINIMAPA (overview de la ruta restante durante
+     la navegación; no rota ni es interactivo) -->
+<div id="miniMapa" class="mini-mapa hidden"></div>
+
 <!-- NAVEGACION ESTILO WAZE -->
 
 <div id="panelNavegacion" class="nav-panel hidden">
@@ -880,8 +929,17 @@ body {
 
     <div class="nav-instruccion">
 
-        <div id="navIcono" class="nav-icono">
-            ➡️
+        <div class="nav-icono-col">
+
+            <div id="navIcono" class="nav-icono">
+                ➡️
+            </div>
+
+            <div
+                id="navDistanciaGiro"
+                class="nav-distancia-giro">
+            </div>
+
         </div>
 
         <div class="nav-texto">
@@ -1756,6 +1814,15 @@ let marcadorFlecha = null;
 let zoomNavegacionInicial = true;
 let rutaLayer = null;
 
+/* Minimapa (overview de la ruta restante durante
+   la navegación). Segundo mapa Leaflet, no rota ni
+   es interactivo; muestra la ruta completa y la
+   posición del conductor para dar el panorama. */
+let mapaMini = null;
+let miniRutaLayer = null;
+let miniConductorMarker = null;
+let miniDestinoMarker = null;
+
 
 /* =====================================================
    ROUTING (proveedor configurable)
@@ -2032,6 +2099,12 @@ let navegando = false;
 let destinoNavLat = null;
 let destinoNavLng = null;
 let etiquetaNavegacion = "";
+
+/* Wake Lock: mantiene la pantalla encendida durante
+   la navegación, como un GPS de auto. El navegador
+   lo suelta solo al minimizar la app; el listener de
+   visibilidad lo vuelve a pedir al regresar. */
+let wakeLock = null;
 
 /* =====================================================
    UTILIDADES
@@ -3226,6 +3299,81 @@ function iniciarMapa(lat, lng) {
         map.invalidateSize();
 
     }
+
+}
+
+function iniciarMiniMapa() {
+
+    if (mapaMini) {
+
+        mapaMini.invalidateSize();
+        return;
+
+    }
+
+    /* Segundo mapa: overview de la ruta. Sin
+       rotación, sin interacción (el usuario no lo
+       mueve; es solo referencia del panorama). */
+    mapaMini =
+        L.map(
+            "miniMapa",
+            {
+                zoomControl: false,
+                attributionControl: false,
+                dragging: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                boxZoom: false,
+                keyboard: false,
+                touchZoom: false,
+                zoomAnimation: false,
+                fadeAnimation: false,
+                markerZoomAnimation: false,
+                rotate: false,
+                bearing: 0
+            }
+        );
+
+    L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        {
+            maxZoom: 20,
+            subdomains: "abcd",
+            attribution:
+                "© OpenStreetMap © CARTO"
+        }
+    ).addTo(mapaMini);
+
+    /* Capa de la ruta (copio la geometría en este
+       mapa; un layer de Leaflet solo vive en un
+       mapa a la vez). */
+    miniRutaLayer = null;
+
+    /* Marcador del conductor (punto amarillo) y
+       del destino (punto rojo) en el minimapa. */
+    miniConductorMarker =
+        L.circleMarker(
+            [0, 0],
+            {
+                radius: 6,
+                color: "#111",
+                weight: 2,
+                fillColor: "#FFD400",
+                fillOpacity: 1
+            }
+        ).addTo(mapaMini);
+
+    miniDestinoMarker =
+        L.circleMarker(
+            [0, 0],
+            {
+                radius: 6,
+                color: "#fff",
+                weight: 2,
+                fillColor: "#e53935",
+                fillOpacity: 1
+            }
+        ).addTo(mapaMini);
 
 }
 
@@ -6795,6 +6943,138 @@ function actualizarGPSConductor() {
    NAVEGACION ESTILO WAZE
 ===================================================== */
 
+/* Pide a la pantalla que no se apague mientras se
+   navega. Requiere HTTPS (o localhost); si el
+   navegador no lo soporta o falla, la navegación
+   sigue funcionando igual, solo que la pantalla
+   puede apagarse normalmente. */
+async function pedirWakeLock() {
+
+    if (
+        !("wakeLock" in navigator) ||
+        !navegando ||
+        document.visibilityState !== "visible"
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        wakeLock =
+            await navigator.wakeLock.request(
+                "screen"
+            );
+
+        /* Si el SO la libera (batería baja,
+           minimizar, etc.), limpiamos la
+           referencia; el listener de visibilidad
+           vuelve a pedirla al regresar. */
+        wakeLock.addEventListener(
+            "release",
+            () => {
+
+                wakeLock = null;
+
+            }
+        );
+
+    } catch(error) {
+
+        console.warn(
+            "Wake Lock no disponible:",
+            error
+        );
+
+    }
+
+}
+
+function soltarWakeLock() {
+
+    if (!wakeLock) {
+
+        return;
+
+    }
+
+    try {
+
+        wakeLock.release();
+
+    } catch(error) {
+
+        /* ya estaba liberada */
+
+    }
+
+    wakeLock = null;
+
+}
+
+/* Al volver de segundo plano el navegador congeló
+   todo (timers, GPS, render). Reajustamos los mapas
+   y recalculamos la ruta desde donde esté el
+   conductor ahora mismo; el Wake Lock también hay
+   que volver a pedirlo porque el navegador lo soltó
+   al minimizar. */
+document.addEventListener(
+    "visibilitychange",
+    () => {
+
+        if (
+            document.visibilityState !==
+            "visible" ||
+            !navegando ||
+            !map
+        ) {
+
+            return;
+
+        }
+
+        pedirWakeLock();
+
+        map.invalidateSize();
+
+        if (mapaMini) {
+
+            mapaMini.invalidateSize();
+
+        }
+
+        navigator.geolocation.getCurrentPosition(
+
+            position => {
+
+                actualizarNavegacion(
+                    position.coords.latitude,
+                    position.coords.longitude
+                );
+
+            },
+
+            () => {
+
+                /* Sin posición aún: con los
+                   invalidateSize el mapa ya queda
+                   usable y el ciclo de GPS de 5 s
+                   refrescará la ruta. */
+
+            },
+
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 5000
+            }
+
+        );
+
+    }
+);
+
 function iniciarNavegacion(
     destLat,
     destLng,
@@ -6803,6 +7083,9 @@ function iniciarNavegacion(
 ) {
 
     navegando = true;
+
+    /* Pantalla encendida mientras se navega. */
+    pedirWakeLock();
 
     destinoNavLat = destLat;
     destinoNavLng = destLng;
@@ -6821,6 +7104,17 @@ function iniciarNavegacion(
             "panelNavegacion"
         )
         .classList.remove("hidden");
+
+    /* Mostrar el minimapa (overview). Se inicializa
+       aquí para que el div ya tenga tamaño (estaba
+       oculto) y Leaflet lo calcule bien. */
+    document
+        .getElementById(
+            "miniMapa"
+        )
+        .classList.remove("hidden");
+
+    iniciarMiniMapa();
 
     /* La flecha ahora es un marcador del mapa (se
        crea en actualizarNavegacion). El overlay
@@ -6896,12 +7190,20 @@ function detenerNavegacion() {
 
     navegando = false;
 
+    soltarWakeLock();
+
     destinoNavLat = null;
     destinoNavLng = null;
 
     document
         .getElementById(
             "panelNavegacion"
+        )
+        .classList.add("hidden");
+
+    document
+        .getElementById(
+            "miniMapa"
         )
         .classList.add("hidden");
 
@@ -7420,6 +7722,26 @@ function obtenerIconoNavegacion(paso) {
 
 }
 
+function formatearDistanciaGiro(metros) {
+
+    const m =
+        Math.round(metros || 0);
+
+    if (m >= 1000) {
+
+        return (m / 1000)
+            .toFixed(1)
+            .replace(".", ",") +
+            " km";
+
+    }
+
+    /* Redondea a decenas para que se vea natural
+       (evita "en 237 m" que cambia cada segundo). */
+    return Math.round(m / 10) * 10 + " m";
+
+}
+
 function textoInstruccionNavegacion(paso) {
 
     /*
@@ -7579,6 +7901,81 @@ async function actualizarNavegacion(
                 }
             )
             .addTo(map);
+
+        /*
+         * MINIMAPA (OVERVIEW DE LA RUTA RESTANTE)
+         *
+         * Dibujamos una COPIA de la geometría en el
+         * segundo mapa (un layer de Leaflet solo vive
+         * en un mapa). Marcamos al conductor y al
+         * destino, y encuadramos toda la ruta para
+         * que se vea el panorama completo aunque el
+         * mapa principal vaya turn-by-turn y rotando.
+         */
+
+        if (mapaMini) {
+
+            if (miniRutaLayer) {
+
+                mapaMini.removeLayer(
+                    miniRutaLayer
+                );
+
+            }
+
+            miniRutaLayer =
+                L.geoJSON(
+                    ruta.geometry,
+                    {
+                        style: {
+                            weight: 4,
+                            color: "#1976d2"
+                        }
+                    }
+                )
+                .addTo(mapaMini);
+
+            const coordsRutaMini =
+                (
+                    ruta.geometry &&
+                    ruta.geometry.coordinates
+                ) || [];
+
+            const posConductorMini =
+                coordsRutaMini.length
+                    ? coordsRutaMini[0]
+                    : [origenLat, origenLng];
+
+            miniConductorMarker.setLatLng([
+                posConductorMini[1],
+                posConductorMini[0]
+            ]);
+
+            miniDestinoMarker.setLatLng([
+                destinoNavLat,
+                destinoNavLng
+            ]);
+
+            /* Encuadrar toda la ruta restante (con
+               margen) para el overview. Sin animación
+               para evitar saltos mientras navega. */
+            try {
+
+                mapaMini.fitBounds(
+                    miniRutaLayer.getBounds(),
+                    {
+                        padding: [12, 12],
+                        animate: false
+                    }
+                );
+
+            } catch (e) {
+
+                /* sin geometría válida: lo ignoramos */
+
+            }
+
+        }
 
         /*
          * RUMBO (HACIA DÓNDE VA EL CONDUCTOR)
@@ -7743,10 +8140,21 @@ async function actualizarNavegacion(
                 ruta.legs[0].steps
             ) || [];
 
-        const siguientePaso =
+        const indiceSiguiente =
             pasos.length > 1
-                ? pasos[1]
-                : pasos[0];
+                ? 1
+                : 0;
+
+        const siguientePaso =
+            pasos[indiceSiguiente];
+
+        /* Por defecto sin distancia al giro; se
+           rellena solo si hay un giro próximo. */
+        document
+            .getElementById(
+                "navDistanciaGiro"
+            )
+            .innerText = "";
 
         if (siguientePaso) {
 
@@ -7774,6 +8182,38 @@ async function actualizarNavegacion(
                     textoInstruccionNavegacion(
                         siguientePaso
                     );
+
+            /*
+             * Distancia al próximo giro: suma de las
+             * distancias de los pasos previos al giro,
+             * contando desde el inicio de la ruta (donde
+             * está el conductor, snappeado a la calle).
+             * ORS trae "distance" por paso.
+             */
+
+            let metrosAlGiro = 0;
+
+            for (
+                let i = 0;
+                i < indiceSiguiente;
+                i++
+            ) {
+
+                metrosAlGiro +=
+                    (pasos[i].distance || 0);
+
+            }
+
+            document
+                .getElementById(
+                    "navDistanciaGiro"
+                )
+                .innerText =
+                    metrosAlGiro > 0
+                        ? formatearDistanciaGiro(
+                            metrosAlGiro
+                        )
+                        : "";
 
         }
 
@@ -7820,6 +8260,12 @@ async function actualizarNavegacion(
                 )
                 .innerText =
                     "🏁";
+
+            document
+                .getElementById(
+                    "navDistanciaGiro"
+                )
+                .innerText = "";
 
         }
 
