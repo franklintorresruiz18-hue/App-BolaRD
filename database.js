@@ -269,6 +269,70 @@ function actualizarTablaUsuarios() {
 
     }
 
+    /* Tipo de vehículo del conductor (carro/moto).
+       Se usa para pintar los conductores cercanos
+       en el mapa con su color (carro amarillo /
+       moto rojo). Se agrega al final para no
+       perderse si arriba se reconstruyó la tabla. */
+    if (!columnas.includes("tipo_vehiculo")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN tipo_vehiculo TEXT
+        `);
+
+        console.log(
+            "➕ usuarios.tipo_vehiculo agregado"
+        );
+
+    }
+
+    /* Posición en vivo del conductor y estado en
+       línea. El conductor publica su ubicación cada
+       pocos segundos; el pasajero consulta los
+       conductores cercanos para pintarlos en el
+       mapa (carro amarillo / moto rojo). Se agregan
+       al final para no perderse si arriba se
+       reconstruyó la tabla. */
+    if (!columnas.includes("lat_actual")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN lat_actual REAL
+        `);
+
+        console.log(
+            "➕ usuarios.lat_actual agregado"
+        );
+
+    }
+
+    if (!columnas.includes("lng_actual")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN lng_actual REAL
+        `);
+
+        console.log(
+            "➕ usuarios.lng_actual agregado"
+        );
+
+    }
+
+    if (!columnas.includes("en_linea")) {
+
+        db.run(`
+            ALTER TABLE usuarios
+            ADD COLUMN en_linea INTEGER DEFAULT 0
+        `);
+
+        console.log(
+            "➕ usuarios.en_linea agregado"
+        );
+
+    }
+
 }
 
 

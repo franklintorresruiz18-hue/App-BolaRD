@@ -1510,8 +1510,20 @@ app.post(
             telefono,
             documento_identidad,
             matricula_vehiculo,
-            modelo_vehiculo
+            modelo_vehiculo,
+            tipo_vehiculo
         } = req.body;
+
+
+        /* Tipo de vehículo del conductor: solo
+           "vehiculo" (carro) o "motor" (moto).
+           Por defecto "vehiculo". Se usa para
+           pintar los carritos en el mapa. */
+        const tipoVehiculoNormalizado =
+
+            tipo_vehiculo === "motor"
+                ? "motor"
+                : "vehiculo";
 
 
         /* =================================
@@ -1771,14 +1783,17 @@ app.post(
                         matricula_vehiculo,
                         modelo_vehiculo,
                         foto_matricula,
-                        foto_vehiculo
+                        foto_vehiculo,
+
+                        tipo_vehiculo
                     )
                     VALUES
                     (
                         ?, ?, ?, ?, ?,
                         ?, ?,
                         ?, ?,
-                        ?, ?, ?, ?
+                        ?, ?, ?, ?,
+                        ?
                     )
                 `);
 
@@ -1800,7 +1815,9 @@ app.post(
                 matricula_vehiculo || null,
                 modelo_vehiculo || null,
                 fotoMatricula,
-                fotoVehiculo
+                fotoVehiculo,
+
+                tipoVehiculoNormalizado
 
             ]);
 
@@ -2146,6 +2163,303 @@ app.post(
 /* =====================================================
 OBTENER DATOS DE UN USUARIO (SALDO, FORMA DE PAGO, ETC)
 ===================================================== */
+
+/* =====================================================
+   POSICIÓN EN VIVO DEL CONDUCTOR
+   El conductor publica su ubicación cada pocos
+   segundos mientras está en línea. El pasajero
+   luego consulta /conductores/cercanos para
+   pintarlos en su mapa (carro amarillo / moto
+   rojo).
+===================================================== */
+
+/* Distancia en kilómetros entre dos puntos
+   (fórmula de Haversine). */
+function distanciaKm(
+    lat1,
+    lng1,
+    lat2,
+    lng2
+) {
+
+    const R =
+        6371;
+
+    const aRad =
+        Math.PI * lat1 / 180;
+
+    const bRad =
+        Math.PI * lat2 / 180;
+
+    const dLat =
+        Math.PI * (lat2 - lat1) / 180;
+
+    const dLng =
+        Math.PI * (lng2 - lng1) / 180;
+
+    const h =
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
+
+        Math.cos(aRad) *
+        Math.cos(bRad) *
+
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(h),
+            Math.sqrt(1 - h)
+        );
+
+    return R * c;
+
+}
+
+
+app.post(
+    "/conductor/posicion",
+    verificarToken,
+    soloRol("conductor"),
+    (req, res) => {
+
+        const db =
+            database.getDb();
+
+        const {
+            lat,
+            lng,
+            online
+        } = req.body;
+
+        const enLinea =
+
+            online === false
+                ? 0
+                : 1;
+
+        /* Si se reporta posición, validamos
+           coordenadas razonables. */
+        if (
+            enLinea === 1 &&
+            (
+                typeof lat !== "number" ||
+                typeof lng !== "number" ||
+                lat < -90 ||
+                lat > 90 ||
+                lng < -180 ||
+                lng > 180
+            )
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "Coordenadas inválidas"
+
+            });
+
+        }
+
+        try {
+
+            const stmt =
+                db.prepare(`
+                    UPDATE usuarios
+                    SET
+                        lat_actual = ?,
+                        lng_actual = ?,
+                        en_linea = ?
+                    WHERE id = ?
+                `);
+
+            stmt.run([
+
+                enLinea === 1
+                    ? lat
+                    : null,
+
+                enLinea === 1
+                    ? lng
+                    : null,
+
+                enLinea,
+
+                req.usuario.id
+
+            ]);
+
+            stmt.free();
+
+            /* Persistimos para que la posición
+               sobreviva reinicios del servidor y
+               sea consultada por los pasajeros. */
+            database.guardarBaseDatos();
+
+            res.json({
+
+                ok: true,
+
+                en_linea: enLinea
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR POSICION CONDUCTOR:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudo guardar la posición"
+
+            });
+
+        }
+
+    }
+);
+
+
+/* =====================================================
+   CONDUCTORES CERCANOS
+   Devuelve los conductores en línea dentro de un
+   radio (km) de la posición del pasajero, con su
+   tipo de vehículo para pintarlos en el mapa.
+===================================================== */
+
+app.get(
+    "/conductores/cercanos",
+    verificarToken,
+    (req, res) => {
+
+        const db =
+            database.getDb();
+
+        const latP =
+            Number(req.query.lat);
+
+        const lngP =
+            Number(req.query.lng);
+
+        const radio =
+            Number(req.query.radio) || 5;
+
+        if (
+            isNaN(latP) ||
+            isNaN(lngP)
+        ) {
+
+            return res.status(400).json({
+
+                error:
+                    "Faltan lat/lng del pasajero"
+
+            });
+
+        }
+
+        try {
+
+            const resultado =
+                db.exec(`
+                    SELECT
+                        id,
+                        nombre,
+                        tipo_vehiculo,
+                        lat_actual,
+                        lng_actual
+                    FROM usuarios
+                    WHERE
+                        tipo = 'conductor'
+                        AND en_linea = 1
+                        AND lat_actual IS NOT NULL
+                        AND lng_actual IS NOT NULL
+                `);
+
+            const filas =
+
+                resultado.length
+                    ? resultado[0].values.map(
+                        fila => ({
+
+                            id: fila[0],
+                            nombre: fila[1],
+                            tipo_vehiculo:
+                                fila[2],
+                            lat_actual:
+                                fila[3],
+                            lng_actual:
+                                fila[4]
+
+                        })
+                      )
+                    : [];
+
+            const cercanos =
+
+                filas
+
+                    .map(f => ({
+
+                        id: f.id,
+                        nombre: f.nombre,
+                        tipo_vehiculo:
+                            f.tipo_vehiculo,
+                        lat: f.lat_actual,
+                        lng: f.lng_actual,
+                        distancia_km:
+                            distanciaKm(
+                                latP,
+                                lngP,
+                                f.lat_actual,
+                                f.lng_actual
+                            )
+
+                    }))
+
+                    .filter(c =>
+                        c.distancia_km <= radio
+                    )
+
+                    .sort((a, b) =>
+                        a.distancia_km -
+                        b.distancia_km
+                    )
+
+                    .slice(0, 50);
+
+            res.json({
+
+                conductores: cercanos
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ERROR CONDUCTORES CERCANOS:",
+                error
+            );
+
+            res.status(500).json({
+
+                error:
+                    "No se pudieron obtener los " +
+                    "conductores cercanos"
+
+            });
+
+        }
+
+    }
+);
+
 
 app.get(
     "/usuarios/:id",

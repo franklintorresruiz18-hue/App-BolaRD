@@ -1881,6 +1881,16 @@ let modoElegirMapa = null;
 let marcadorRecogida = null;
 let marcadorDestino = null;
 let marcadorConductor = null;
+
+/* Marcadores de los conductores cercanos que se
+   pintan en el mapa del pasajero (carro amarillo
+   / moto rojo). Se indexan por id de conductor
+   para actualizar su posición sin recrearlos. */
+let marcadoresConductoresCercanos = {};
+
+/* Intervalo que refresca la lista de conductores
+   cercanos mientras el pasajero busca viaje. */
+let intervaloConductoresCercanos = null;
 /* Flecha del conductor como marcador del mapa: se
    ubica sobre la ruta, así que a cualquier zoom o
    desplazamiento queda pegada a la línea azul (a
@@ -2511,6 +2521,15 @@ async function registrarUsuario() {
             modelo
         );
 
+        /* Tipo de vehículo elegido en el paso 3
+           del registro (carro "vehiculo" o moto
+           "motor"). Se envía al backend para que
+           lo guarde en usuarios.tipo_vehiculo. */
+        datosFormulario.append(
+            "tipo_vehiculo",
+            tipoVehiculo
+        );
+
         const fotoDocumento =
             document.getElementById(
                 "registroFotoDocumento"
@@ -2943,6 +2962,15 @@ function cerrarSesion() {
     viajeActualId = null;
     conductorOnline = false;
 
+    /* Avisamos al backend (el token aún está en
+       localStorage) para salir del mapa de
+       conductores cercanos. */
+    publicarPosicionConductor(
+        null,
+        null,
+        false
+    );
+
     localStorage.removeItem(
         "mibola_usuario"
     );
@@ -3187,7 +3215,7 @@ function crearIconoMapa(
 
 }
 
-function crearIconoConductor() {
+function crearIconoConductor(tipo) {
 
     /*
      * Flecha de navegación estilo Waze/Google
@@ -3196,7 +3224,28 @@ function crearIconoConductor() {
      * mantiene "de pie" en pantalla, la punta
      * de la flecha siempre apunta hacia donde
      * va el conductor.
+     *
+     * El color depende del tipo de vehículo:
+     * carro ("vehiculo") = amarillo, moto
+     * ("motor") = rojo. Así se distingue en
+     * el mapa (carro amarillo / moto rojo).
      */
+
+    const esMoto =
+
+        tipo === "motor";
+
+    const colorFlecha =
+
+        esMoto
+            ? "#c62828"
+            : "#FFD400";
+
+    const colorHalo =
+
+        esMoto
+            ? "rgba(198,40,40,0.28)"
+            : "rgba(255,214,0,0.28)";
 
     return L.divIcon({
 
@@ -3209,11 +3258,11 @@ function crearIconoConductor() {
             "xmlns='http://www.w3.org/2000/svg'>" +
 
             "<circle cx='23' cy='23' r='20' " +
-            "fill='rgba(255,214,0,0.28)' />" +
+            "fill='" + colorHalo + "' />" +
 
             "<polygon " +
             "points='23,6 36,34 23,27 10,34' " +
-            "fill='#FFD400' " +
+            "fill='" + colorFlecha + "' " +
             "stroke='white' " +
             "stroke-width='3' " +
             "stroke-linejoin='round' />" +
@@ -3249,7 +3298,10 @@ function crearIconoConductorInvisible() {
 
 }
 
-function crearIconoFlechaConductor(rumboGrados) {
+function crearIconoFlechaConductor(
+    rumboGrados,
+    tipo
+) {
 
     /*
      * Ícono de la flecha del conductor (marcador
@@ -3259,10 +3311,30 @@ function crearIconoFlechaConductor(rumboGrados) {
      * avanza la ruta. Como es un marcador ubicado
      * sobre la propia ruta, se queda pegado a la
      * línea azul a cualquier zoom.
+     *
+     * El color depende del tipo de vehículo:
+     * carro ("vehiculo") = amarillo, moto
+     * ("motor") = rojo.
      */
 
     const r =
         Number(rumboGrados) || 0;
+
+    const esMoto =
+
+        tipo === "motor";
+
+    const colorFlecha =
+
+        esMoto
+            ? "#c62828"
+            : "#FFD400";
+
+    const colorHalo =
+
+        esMoto
+            ? "rgba(198,40,40,0.28)"
+            : "rgba(255,214,0,0.28)";
 
     return L.divIcon({
 
@@ -3277,11 +3349,11 @@ function crearIconoFlechaConductor(rumboGrados) {
             "xmlns='http://www.w3.org/2000/svg'>" +
 
             "<circle cx='23' cy='23' r='20' " +
-            "fill='rgba(255,214,0,0.28)' />" +
+            "fill='" + colorHalo + "' />" +
 
             "<polygon " +
             "points='23,6 36,34 23,27 10,34' " +
-            "fill='#FFD400' " +
+            "fill='" + colorFlecha + "' " +
             "stroke='white' " +
             "stroke-width='3' " +
             "stroke-linejoin='round' />" +
@@ -4424,6 +4496,25 @@ async function solicitarViaje() {
 
         iniciarSeguimientoPasajero();
 
+        /* Mostramos los conductores cercanos en el
+           mapa (carro amarillo / moto rojo) mientras
+           el pasajero espera uno. */
+        mostrarConductoresCercanos();
+
+        if (intervaloConductoresCercanos) {
+
+            clearInterval(
+                intervaloConductoresCercanos
+            );
+
+        }
+
+        intervaloConductoresCercanos =
+            setInterval(
+                mostrarConductoresCercanos,
+                5000
+            );
+
     } catch(error) {
 
         alert(
@@ -4611,6 +4702,174 @@ function detenerSeguimientoPasajero() {
         );
 
         intervaloPasajero = null;
+
+    }
+
+    /* Dejamos de mostrar los conductores
+       cercanos cuando el seguimiento termina
+       (viaje cancelado o finalizado). */
+    detenerConductoresCercanos();
+
+}
+
+
+/* =====================================================
+   CONDUCTORES CERCANOS EN EL MAPA DEL PASAJERO
+   Mientras el pasajero busca viaje, consultamos los
+   conductores en línea cerca de la recogida y los
+   pintamos en el mapa (carro amarillo / moto rojo).
+===================================================== */
+
+function detenerConductoresCercanos() {
+
+    if (intervaloConductoresCercanos) {
+
+        clearInterval(
+            intervaloConductoresCercanos
+        );
+
+        intervaloConductoresCercanos = null;
+
+    }
+
+    limpiarConductoresCercanos();
+
+}
+
+
+function limpiarConductoresCercanos() {
+
+    Object
+
+        .values(
+            marcadoresConductoresCercanos
+        )
+
+        .forEach(m =>
+            m.remove()
+        );
+
+    marcadoresConductoresCercanos = {};
+
+}
+
+
+async function mostrarConductoresCercanos() {
+
+    if (
+        !map ||
+        recogidaLat === null ||
+        recogidaLng === null
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        const respuesta =
+            await fetch(
+                "/conductores/cercanos" +
+                "?lat=" + recogidaLat +
+                "&lng=" + recogidaLng +
+                "&radio=5"
+            );
+
+        if (!respuesta.ok) {
+
+            return;
+
+        }
+
+        const datos =
+            await respuesta.json();
+
+        const lista =
+            datos.conductores || [];
+
+        const idsVistos = {};
+
+        lista.forEach(c => {
+
+            idsVistos[c.id] = true;
+
+            const existente =
+
+                marcadoresConductoresCercanos[
+                    c.id
+                ];
+
+            if (existente) {
+
+                existente.setLatLng([
+                    c.lat,
+                    c.lng
+                ]);
+
+                return;
+
+            }
+
+            const marcador =
+                L.marker(
+                    [c.lat, c.lng],
+                    {
+                        icon:
+                            crearIconoConductor(
+                                c.tipo_vehiculo
+                            )
+                    }
+                )
+                .addTo(map);
+
+            marcador.bindPopup(
+                c.nombre +
+                " (" +
+                (
+                    c.tipo_vehiculo === "motor"
+                        ? "moto"
+                        : "carro"
+                ) +
+                ")"
+            );
+
+            marcadoresConductoresCercanos[
+                c.id
+            ] = marcador;
+
+        });
+
+        /* Quitamos los que ya no están
+           cercanos o en línea. */
+        Object
+
+            .keys(
+                marcadoresConductoresCercanos
+            )
+
+            .forEach(id => {
+
+                if (!idsVistos[id]) {
+
+                    marcadoresConductoresCercanos[
+                        id
+                    ].remove();
+
+                    delete marcadoresConductoresCercanos[
+                        id
+                    ];
+
+                }
+
+            });
+
+    } catch (error) {
+
+        console.error(
+            "Conductores cercanos:",
+            error
+        );
 
     }
 
@@ -4810,6 +5069,11 @@ function mostrarNuevoViajePasajero() {
 ===================================================== */
 
 function mostrarConductorPasajero(viaje) {
+
+    /* Ya hay un conductor asignado: ocultamos los
+       puntos de conductores cercanos (carro/moto)
+       y dejamos de refrescarlos. */
+    detenerConductoresCercanos();
 
     document
         .getElementById(
@@ -5815,6 +6079,14 @@ function mostrarPasajero() {
        desconectado (deja de recibir solicitudes), como
        Uber cuando dejas de estar en línea. */
     conductorOnline = false;
+
+    /* Avisamos al backend para dejar de aparecer
+       en el mapa de conductores cercanos. */
+    publicarPosicionConductor(
+        null,
+        null,
+        false
+    );
 
     if (intervaloConductor) {
 
@@ -7121,6 +7393,14 @@ function actualizarGPSConductor() {
 
             }
 
+            /* Publicamos la posición en el backend
+               para que el pasajero vea los
+               conductores cercanos en su mapa. */
+            publicarPosicionConductor(
+                lat,
+                lng
+            );
+
             if (navegando) {
 
                 actualizarNavegacion(
@@ -7141,6 +7421,64 @@ function actualizarGPSConductor() {
         }
 
     );
+
+}
+
+
+async function publicarPosicionConductor(
+    lat,
+    lng,
+    online
+) {
+
+    /* El conductor publica su ubicación en el
+       backend para que el pasajero pueda ver los
+       conductores cercanos en su mapa (carro
+       amarillo / moto rojo). Si online es false,
+       se marca fuera de línea. */
+
+    if (
+        !usuarioActual ||
+        usuarioActual.tipo !== "conductor"
+    ) {
+
+        return;
+
+    }
+
+    try {
+
+        await fetch(
+            "/conductor/posicion",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+                body:
+                    JSON.stringify({
+
+                        lat: lat || null,
+                        lng: lng || null,
+
+                        online:
+                            online === false
+                                ? false
+                                : true
+
+                    })
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "No se pudo publicar la posición:",
+            error
+        );
+
+    }
 
 }
 
@@ -8231,7 +8569,10 @@ async function actualizarNavegacion(
                         {
                             icon:
                                 crearIconoFlechaConductor(
-                                    rumboActual || 0
+                                    rumboActual || 0,
+                                    usuarioActual
+                                        ? usuarioActual.tipo_vehiculo
+                                        : null
                                 ),
                             interactive: false,
                             keyboard: false
@@ -8248,7 +8589,10 @@ async function actualizarNavegacion(
 
                 marcadorFlecha.setIcon(
                     crearIconoFlechaConductor(
-                        rumboActual || 0
+                        rumboActual || 0,
+                        usuarioActual
+                            ? usuarioActual.tipo_vehiculo
+                            : null
                     )
                 );
 
